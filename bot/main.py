@@ -9,7 +9,6 @@ from telegram.ext import (
 from bot.config import TELEGRAM_BOT_TOKEN
 from bot.db import init_db
 from bot.handlers.start_handler import start_command, help_command
-from bot.handlers.sheet_handler import connect_sheet_command, sheet_info_command
 from bot.handlers.photo_handler import photo_message_handler, callback_trade_action
 from bot.handlers.stats_handler import stats_command
 from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
@@ -35,10 +34,10 @@ async def inline_shortcut_router(update: Update, context: ContextTypes.DEFAULT_T
         await trades_command(update, context)
     elif data == "cmd_export_prompt":
         await export_command(update, context)
-    elif data == "cmd_connect_sheet_prompt":
+    elif data == "cmd_manual_trade_prompt":
         await query.message.reply_html(
-            "📄 <b>Connect Your Google Sheet</b>\n\n"
-            "Run <code>/connect_sheet &lt;your_google_sheet_url&gt;</code> to link your sheet!"
+            "✏️ <b>Add a trade manually</b>\n\n"
+            "Use <code>/manual_trade &lt;Symbol&gt; &lt;BUY/SELL&gt; &lt;Lots&gt; &lt;OpenPrice&gt; &lt;ClosePrice&gt; &lt;NetPnL&gt;</code>."
         )
 
 def main():
@@ -58,8 +57,6 @@ def main():
     # Register Command Handlers
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("connect_sheet", connect_sheet_command))
-    app.add_handler(CommandHandler("sheet_info", sheet_info_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("trades", trades_command))
     app.add_handler(CommandHandler("manual_trade", manual_trade_command))

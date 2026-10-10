@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FXDiary - MT5 Trading Journal & Telegram Sync</title>
+  <title>FXDiary - MT5 Trading Journal</title>
   
   <!-- Google Fonts & Chart.js -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,19 +14,39 @@
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-  <div class="container">
+  <main id="signin-screen" class="container signin-screen">
+    <div class="card signin-card">
+      <div class="brand-icon">📈</div>
+      <h1>Welcome to FXDiary</h1>
+      <p>Sign in with Telegram to open your private trading dashboard.</p>
+      {% if telegram_bot_username %}
+      <script async src="https://telegram.org/js/telegram-widget.js?22"
+        data-telegram-login="{{ telegram_bot_username }}"
+        data-size="large"
+        data-userpic="false"
+        data-onauth="onTelegramAuth(user)"
+        data-request-access="write"></script>
+      {% else %}
+      <p class="signin-error">Telegram sign-in is not configured. Set TELEGRAM_BOT_USERNAME on the server.</p>
+      {% endif %}
+      <p id="signin-error" class="signin-error" hidden></p>
+    </div>
+  </main>
+
+  <div class="container" id="dashboard-app" hidden>
     <!-- Header -->
     <header>
       <div class="brand">
         <div class="brand-icon">📈</div>
         <div>
           <h1>FXDiary</h1>
-          <p style="font-size:12px; color:var(--text-secondary);">MT5 Trading Journal & Google Sheets Sync</p>
+          <p style="font-size:12px; color:var(--text-secondary);">Your private MT5 trading journal</p>
         </div>
       </div>
 
       <div class="header-actions">
-        <span id="sheet-badge" class="badge" style="align-self: center;">Connecting...</span>
+        <span id="account-name" class="badge" style="align-self: center;"></span>
+        <button id="logout-button" class="btn btn-secondary">Sign out</button>
         <a href="/api/export/pdf" class="btn btn-secondary">📄 Export PDF</a>
         <a href="/api/export/excel" class="btn btn-primary">📊 Export Excel</a>
       </div>
@@ -126,15 +146,15 @@
       </div>
 
       <div class="card">
-        <div class="card-title">🤖 Telegram Bot Sync Instructions</div>
+        <div class="card-title">🤖 Add Trades with Telegram</div>
         <p style="font-size:14px; color:var(--text-secondary); margin-bottom:12px;">
-          Send your MT5 trade screenshots directly to your Telegram Bot to instantly parse and record trades into your Google Sheet!
+          Send your MT5 trade screenshots to the Telegram bot. Your dashboard is linked to your Telegram account.
         </p>
         <div style="background:rgba(15,23,42,0.6); padding:14px; border-radius:10px; font-family:monospace; font-size:13px; color:#A7F3D0;">
-          1. Share your Google Sheet to bot service email<br>
-          2. Telegram command: /connect_sheet &lt;URL&gt;<br>
-          3. Send MT5 screenshot to bot anytime!<br>
-          4. Command: /stats or /export (PDF/Excel)
+          1. Sign in with the same Telegram account<br>
+          2. Send an MT5 screenshot to the bot<br>
+          3. Confirm the extracted trade<br>
+          4. It appears here in your dashboard
         </div>
       </div>
     </div>

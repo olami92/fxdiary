@@ -3,13 +3,18 @@ import sys
 import logging
 import asyncio
 import datetime
+import hashlib
+import hmac
+import secrets
+import time
 from pathlib import Path
 from typing import List, Optional
-from fastapi import FastAPI, Request, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
 
 from bot.config import UPLOADS_DIR, GEMINI_API_KEY, HOST, PORT
 from bot.db import init_db, get_or_create_user, get_user_trades, add_trade, delete_user_trade, AsyncSessionLocal
@@ -20,6 +25,9 @@ from bot.export_engine import generate_pdf_report, generate_excel_report
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 app = FastAPI(title="FXDiary Dashboard & Web App")
+SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("TELEGRAM_BOT_TOKEN") or secrets.token_urlsafe(32)
+TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", https_only=os.getenv("RENDER", "") != "")
 
 # Mount static and templates
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "web" / "static")), name="static")
@@ -31,7 +39,6 @@ async def _run_telegram_bot_background(token: str):
     """Run Telegram bot polling in a non-blocking background task."""
     from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
     from bot.handlers.start_handler import start_command, help_command
-    from bot.handlers.sheet_handler import connect_sheet_command, sheet_info_command
     from bot.handlers.photo_handler import photo_message_handler, callback_trade_action
     from bot.handlers.stats_handler import stats_command
     from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
@@ -43,8 +50,6 @@ async def _run_telegram_bot_background(token: str):
         bot_app = ApplicationBuilder().token(token).build()
         bot_app.add_handler(CommandHandler("start", start_command))
         bot_app.add_handler(CommandHandler("help", help_command))
-        bot_app.add_handler(CommandHandler("connect_sheet", connect_sheet_command))
-        bot_app.add_handler(CommandHandler("sheet_info", sheet_info_command))
         bot_app.add_handler(CommandHandler("stats", stats_command))
         bot_app.add_handler(CommandHandler("trades", trades_command))
         bot_app.add_handler(CommandHandler("manual_trade", manual_trade_command))
@@ -70,11 +75,75 @@ async def startup_event():
         asyncio.create_task(_run_telegram_bot_background(token))
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
+async def index(request: Request):
     """Render Web Dashboard homepage."""
-    html_file = BASE_DIR / "web" / "templates" / "index.html"
-    with open(html_file, "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={"telegram_bot_username": TELEGRAM_BOT_USERNAME},
+    )
+
+
+def _verified_telegram_user(auth_data: dict) -> dict:
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    received_hash = auth_data.get("hash")
+    if not bot_token or not received_hash:
+        raise HTTPException(status_code=401, detail="Telegram sign-in is not configured.")
+
+    try:
+        auth_date = int(auth_data.get("auth_date", 0))
+        user_id = int(auth_data.get("id", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid Telegram sign-in data.")
+
+    if user_id <= 0 or auth_date > time.time() + 30 or time.time() - auth_date > 86400:
+        raise HTTPException(status_code=401, detail="Telegram sign-in data has expired or is invalid.")
+
+    check_string = "\n".join(
+        f"{key}={value}"
+        for key, value in sorted(auth_data.items())
+        if key != "hash" and value is not None
+    )
+    secret_key = hashlib.sha256(bot_token.encode()).digest()
+    expected_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_hash, str(received_hash)):
+        raise HTTPException(status_code=401, detail="Telegram sign-in could not be verified.")
+    return auth_data
+
+
+async def _require_dashboard_user(request: Request):
+    user_id = request.session.get("telegram_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Please sign in with Telegram.")
+    return await get_or_create_user(
+        int(user_id),
+        username=request.session.get("username"),
+        first_name=request.session.get("first_name"),
+    )
+
+
+@app.post("/api/auth/telegram")
+async def telegram_login(request: Request):
+    auth_data = await request.json()
+    user_data = _verified_telegram_user(auth_data)
+    request.session.clear()
+    request.session["telegram_id"] = int(user_data["id"])
+    request.session["username"] = user_data.get("username")
+    request.session["first_name"] = user_data.get("first_name")
+    user = await _require_dashboard_user(request)
+    return {"id": user.telegram_id, "first_name": user.first_name, "username": user.username}
+
+
+@app.get("/api/auth/me")
+async def current_dashboard_user(request: Request):
+    user = await _require_dashboard_user(request)
+    return {"id": user.telegram_id, "first_name": user.first_name, "username": user.username}
+
+
+@app.post("/api/auth/logout")
+async def telegram_logout(request: Request):
+    request.session.clear()
+    return {"success": True}
 
 @app.get("/health")
 async def health_check():
@@ -82,24 +151,21 @@ async def health_check():
     return {"status": "ok", "app": "FXDiary"}
 
 @app.get("/api/stats")
-async def get_stats(telegram_id: int = 10001):
+async def get_stats(request: Request):
     """Fetch trading statistics JSON."""
-    user = await get_or_create_user(telegram_id, username="web_user", first_name="Trader")
-    trades = await get_user_trades(telegram_id, limit=500)
+    user = await _require_dashboard_user(request)
+    trades = await get_user_trades(user.telegram_id, limit=500)
     stats = calculate_stats(trades)
     return JSONResponse(content={
-        "user": {
-            "name": user.first_name or "Trader",
-            "google_sheet_id": user.google_sheet_id,
-            "sheet_title": user.sheet_title
-        },
+        "user": {"name": user.first_name or "Trader"},
         "stats": stats
     })
 
 @app.get("/api/trades")
-async def list_trades(telegram_id: int = 10001):
+async def list_trades(request: Request):
     """Fetch list of recent trades."""
-    trades = await get_user_trades(telegram_id, limit=100)
+    user = await _require_dashboard_user(request)
+    trades = await get_user_trades(user.telegram_id, limit=100)
     result = []
     for t in trades:
         result.append({
@@ -118,10 +184,13 @@ async def list_trades(telegram_id: int = 10001):
     return JSONResponse(content={"trades": result})
 
 @app.post("/api/upload-screenshot")
-async def upload_screenshot(file: UploadFile = File(...), telegram_id: int = Form(10001)):
+async def upload_screenshot(request: Request, file: UploadFile = File(...)):
     """Upload and OCR parse an MT5 screenshot from web dashboard."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No file selected")
+
+    user = await _require_dashboard_user(request)
+    telegram_id = user.telegram_id
 
     file_name = f"web_{telegram_id}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
     file_path = UPLOADS_DIR / file_name
@@ -139,7 +208,6 @@ async def upload_screenshot(file: UploadFile = File(...), telegram_id: int = For
     })
 
 class ManualTradeRequest(BaseModel):
-    telegram_id: int = 10001
     symbol: str
     trade_type: str
     volume: float
@@ -148,9 +216,9 @@ class ManualTradeRequest(BaseModel):
     profit: float
 
 @app.post("/api/trades")
-async def create_trade(trade_req: ManualTradeRequest):
+async def create_trade(trade_req: ManualTradeRequest, request: Request):
     """Add trade manually from web dashboard."""
-    user = await get_or_create_user(trade_req.telegram_id, username="web_user", first_name="Trader")
+    user = await _require_dashboard_user(request)
     trade_data = {
         "symbol": trade_req.symbol.upper(),
         "trade_type": trade_req.trade_type.upper(),
@@ -161,19 +229,21 @@ async def create_trade(trade_req: ManualTradeRequest):
         "net_profit": trade_req.profit,
         "close_time": datetime.datetime.utcnow()
     }
-    trade = await add_trade(trade_req.telegram_id, trade_data)
+    trade = await add_trade(user.telegram_id, trade_data)
     return JSONResponse(content={"success": True, "trade_id": trade.id})
 
 @app.delete("/api/trades/{trade_id}")
-async def delete_trade_endpoint(trade_id: int, telegram_id: int = 10001):
+async def delete_trade_endpoint(trade_id: int, request: Request):
     """Delete trade by ID."""
-    success = await delete_user_trade(telegram_id, trade_id)
+    user = await _require_dashboard_user(request)
+    success = await delete_user_trade(user.telegram_id, trade_id)
     return JSONResponse(content={"success": success})
 
 @app.get("/api/export/pdf")
-async def download_pdf(telegram_id: int = 10001):
+async def download_pdf(request: Request):
     """Export PDF report."""
-    user = await get_or_create_user(telegram_id, username="web_user", first_name="Trader")
+    user = await _require_dashboard_user(request)
+    telegram_id = user.telegram_id
     trades = await get_user_trades(telegram_id, limit=500)
     stats = calculate_stats(trades)
     
@@ -185,9 +255,10 @@ async def download_pdf(telegram_id: int = 10001):
     raise HTTPException(status_code=500, detail="Failed to generate PDF report")
 
 @app.get("/api/export/excel")
-async def download_excel(telegram_id: int = 10001):
+async def download_excel(request: Request):
     """Export Excel spreadsheet."""
-    user = await get_or_create_user(telegram_id, username="web_user", first_name="Trader")
+    user = await _require_dashboard_user(request)
+    telegram_id = user.telegram_id
     trades = await get_user_trades(telegram_id, limit=500)
     stats = calculate_stats(trades)
     

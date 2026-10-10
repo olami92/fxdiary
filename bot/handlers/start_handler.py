@@ -23,10 +23,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📸 <b>How it works:</b>\n"
         f"1️⃣ Simply send me a <b>screenshot of your MT5 trade history</b>.\n"
         f"2️⃣ My Vision AI will instantly extract the ticket, symbol, lot size, prices, and PnL.\n"
-        f"3️⃣ Verify & confirm to record it in your <b>Google Sheet</b> and local diary!\n\n"
+        f"3️⃣ Verify & confirm to save it to your personal trading diary!\n\n"
         f"📊 <b>Commands:</b>\n"
-        f"• /connect_sheet <code>&lt;URL or ID&gt;</code> - Link your Google Sheet\n"
-        f"• /sheet_info - Check connected Google Sheet status\n"
         f"• /stats - View win rate, PnL & equity curve chart\n"
         f"• /trades - View recent trades & edit history\n"
         f"• /export - Download PDF or Excel report\n"
@@ -36,11 +34,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("📊 View Analytics", callback_query_data="cmd_stats"),
-            InlineKeyboardButton("📄 Connect Sheet", callback_query_data="cmd_connect_sheet_prompt")
+            InlineKeyboardButton("📋 My Trades", callback_query_data="cmd_trades_list")
         ],
         [
             InlineKeyboardButton("📥 Export PDF/Excel", callback_query_data="cmd_export_prompt"),
-            InlineKeyboardButton("📋 My Trades", callback_query_data="cmd_trades_list")
+            InlineKeyboardButton("✏️ Add Trade", callback_query_data="cmd_manual_trade_prompt")
         ]
     ]
 
@@ -53,13 +51,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /help command."""
     help_text = (
         "📖 <b>FXDiary Bot User Guide</b>\n\n"
-        "<b>1. Google Sheet Setup:</b>\n"
-        "• Create a Google Sheet and share write access with your bot service account email.\n"
-        "• Run <code>/connect_sheet &lt;your_google_sheet_url&gt;</code> to link it.\n\n"
-        "<b>2. Uploading Screenshots:</b>\n"
+        "<b>1. Uploading Screenshots:</b>\n"
         "• Send any MT5 mobile or desktop trade screenshot directly as an image.\n"
         "• The bot will extract trade fields and ask for confirmation.\n\n"
-        "<b>3. Querying & Reports:</b>\n"
+        "<b>2. Querying & Reports:</b>\n"
         "• Use <code>/stats</code> to view win rate, profit factor, max drawdown, and equity curve.\n"
         "• Use <code>/export</code> to generate a PDF report or Excel spreadsheet.\n\n"
         "Need help? Contact support or check documentation."

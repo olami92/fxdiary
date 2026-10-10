@@ -3,9 +3,56 @@ let winLossChart = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   initCharts();
-  loadDashboardData();
   setupEventListeners();
+  initializeDashboard();
 });
+
+async function initializeDashboard() {
+  try {
+    const response = await fetch("/api/auth/me");
+    if (!response.ok) return showSignIn();
+    const user = await response.json();
+    showDashboard(user);
+    loadDashboardData();
+  } catch (err) {
+    showSignIn("Unable to connect. Please refresh and try again.");
+  }
+}
+
+window.onTelegramAuth = async function (telegramUser) {
+  const errorEl = document.getElementById("signin-error");
+  if (errorEl) errorEl.hidden = true;
+  try {
+    const response = await fetch("/api/auth/telegram", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(telegramUser)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Telegram sign-in failed.");
+    showDashboard(result);
+    loadDashboardData();
+  } catch (err) {
+    showSignIn(err.message);
+  }
+};
+
+function showSignIn(message = "") {
+  document.getElementById("signin-screen").hidden = false;
+  document.getElementById("dashboard-app").hidden = true;
+  const errorEl = document.getElementById("signin-error");
+  if (errorEl) {
+    errorEl.textContent = message;
+    errorEl.hidden = !message;
+  }
+}
+
+function showDashboard(user) {
+  document.getElementById("signin-screen").hidden = true;
+  document.getElementById("dashboard-app").hidden = false;
+  const name = user.first_name || user.username || "Telegram user";
+  document.getElementById("account-name").textContent = `👤 ${name}`;
+}
 
 async function loadDashboardData() {
   try {
@@ -14,11 +61,12 @@ async function loadDashboardData() {
       fetch("/api/trades")
     ]);
 
+    if (statsRes.status === 401 || tradesRes.status === 401) return showSignIn();
+
     const statsData = await statsRes.json();
     const tradesData = await tradesRes.json();
 
     renderStats(statsData.stats);
-    renderSheetInfo(statsData.user);
     renderTrades(tradesData.trades);
     updateCharts(tradesData.trades, statsData.stats);
 
@@ -46,19 +94,6 @@ function renderStats(stats) {
   document.getElementById("avg-loss").textContent = `-$${(stats.avg_loss || 0).toFixed(2)}`;
   document.getElementById("max-dd").textContent = `-$${(stats.max_drawdown || 0).toFixed(2)}`;
   document.getElementById("best-symbol").textContent = stats.best_symbol || "N/A";
-}
-
-function renderSheetInfo(user) {
-  const badge = document.getElementById("sheet-badge");
-  if (!badge) return;
-
-  if (user && user.google_sheet_id) {
-    badge.innerHTML = `🟢 <b>Connected Sheet:</b> ${user.sheet_title || 'Google Sheet'}`;
-    badge.className = "badge badge-win";
-  } else {
-    badge.innerHTML = `⚪ <b>No Sheet Linked</b> (Use Telegram Bot /connect_sheet)`;
-    badge.className = "badge";
-  }
 }
 
 function renderTrades(trades) {
@@ -172,6 +207,11 @@ function updateCharts(trades, stats) {
 }
 
 function setupEventListeners() {
+  document.getElementById("logout-button")?.addEventListener("click", async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    showSignIn();
+  });
+
   const dropZone = document.getElementById("drop-zone");
   const fileInput = document.getElementById("file-input");
 

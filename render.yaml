@@ -7,9 +7,11 @@ services:
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: GEMINI_API_KEY
+      - key: TELEGRAM_BOT_USERNAME
         sync: false
-      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY
         sync: false
       - key: DATABASE_URL
         value: sqlite+aiosqlite:///data/fxdiary.db
