@@ -33,6 +33,11 @@ async def index():
     with open(html_file, "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Render."""
+    return {"status": "ok", "app": "FXDiary"}
+
 @app.get("/api/stats")
 async def get_stats(telegram_id: int = 10001):
     """Fetch trading statistics JSON."""
