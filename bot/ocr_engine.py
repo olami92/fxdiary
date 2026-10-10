@@ -12,28 +12,6 @@ logger = logging.getLogger(__name__)
 # Try importing requests for Gemini API REST call
 import requests
 
-# Try importing local OCR packages
-try:
-    import pytesseract
-except ImportError:
-    pytesseract = None
-
-try:
-    import easyocr
-except ImportError:
-    easyocr = None
-
-_easyocr_reader = None
-
-def get_easyocr_reader():
-    global _easyocr_reader
-    if _easyocr_reader is None and easyocr is not None:
-        try:
-            _easyocr_reader = easyocr.Reader(['en'], gpu=False)
-        except Exception as e:
-            logger.warning(f"Failed to initialize EasyOCR: {e}")
-    return _easyocr_reader
-
 PROMPT_TEXT = """
 You are an expert financial trade screenshot OCR parser. Analyze this MetaTrader 5 (MT5) history screenshot carefully.
 Extract all trade records visible in the image.
@@ -132,21 +110,22 @@ def _parse_with_gemini(image_path: str, api_key: str) -> List[Dict[str, Any]]:
 def _parse_with_local_ocr(image_path: str) -> List[Dict[str, Any]]:
     """Local fallback parser using EasyOCR / PyTesseract + Heuristic Regex rules."""
     extracted_text = ""
-    reader = get_easyocr_reader()
 
-    if reader:
+    try:
+        import pytesseract
+        img = Image.open(image_path)
+        extracted_text = pytesseract.image_to_string(img)
+    except Exception as e:
+        logger.debug(f"PyTesseract not available: {e}")
+
+    if not extracted_text:
         try:
+            import easyocr
+            reader = easyocr.Reader(['en'], gpu=False)
             results = reader.readtext(image_path, detail=0)
             extracted_text = "\n".join(results)
         except Exception as e:
-            logger.warning(f"EasyOCR failed: {e}")
-
-    if not extracted_text and pytesseract:
-        try:
-            img = Image.open(image_path)
-            extracted_text = pytesseract.image_to_string(img)
-        except Exception as e:
-            logger.warning(f"PyTesseract failed: {e}")
+            logger.debug(f"EasyOCR not available: {e}")
 
     if not extracted_text:
         logger.warning("No OCR text extracted from image.")

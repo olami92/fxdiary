@@ -22,9 +22,49 @@ app = FastAPI(title="FXDiary Dashboard & Web App")
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "web" / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
 
+logger = logging.getLogger(__name__)
+
+async def _run_telegram_bot_background(token: str):
+    """Run Telegram bot polling in a non-blocking background task."""
+    from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+    from bot.handlers.start_handler import start_command, help_command
+    from bot.handlers.sheet_handler import connect_sheet_command, sheet_info_command
+    from bot.handlers.photo_handler import photo_message_handler, callback_trade_action
+    from bot.handlers.stats_handler import stats_command
+    from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
+    from bot.handlers.export_handler import export_command, export_callback_handler
+    from bot.main import inline_shortcut_router
+
+    try:
+        logger.info("Initializing Telegram Bot in background...")
+        bot_app = ApplicationBuilder().token(token).build()
+        bot_app.add_handler(CommandHandler("start", start_command))
+        bot_app.add_handler(CommandHandler("help", help_command))
+        bot_app.add_handler(CommandHandler("connect_sheet", connect_sheet_command))
+        bot_app.add_handler(CommandHandler("sheet_info", sheet_info_command))
+        bot_app.add_handler(CommandHandler("stats", stats_command))
+        bot_app.add_handler(CommandHandler("trades", trades_command))
+        bot_app.add_handler(CommandHandler("manual_trade", manual_trade_command))
+        bot_app.add_handler(CommandHandler("export", export_command))
+        bot_app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
+        bot_app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(confirm_save_trade|discard_pending_trade)$"))
+        bot_app.add_handler(CallbackQueryHandler(delete_trade_callback, pattern="^del_trade_"))
+        bot_app.add_handler(CallbackQueryHandler(export_callback_handler, pattern="^export_"))
+        bot_app.add_handler(CallbackQueryHandler(inline_shortcut_router, pattern="^cmd_"))
+
+        await bot_app.initialize()
+        await bot_app.start()
+        await bot_app.updater.start_polling(drop_pending_updates=True)
+        logger.info("Telegram Bot active and polling!")
+    except Exception as e:
+        logger.error(f"Error starting Telegram Bot: {e}", exc_info=True)
+
 @app.on_event("startup")
 async def startup_event():
     await init_db()
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if token and token != "YOUR_BOT_TOKEN_HERE":
+        asyncio.create_task(_run_telegram_bot_background(token))
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -158,3 +198,9 @@ async def download_excel(telegram_id: int = 10001):
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     raise HTTPException(status_code=500, detail="Failed to generate Excel report")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    print(f"--> Binding web.app to 0.0.0.0:{port}...")
+    uvicorn.run("web.app:app", host="0.0.0.0", port=port)
