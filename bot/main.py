@@ -66,7 +66,7 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
 
     # Callback Query Handlers
-    app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(confirm_save_trade|discard_pending_trade)$"))
+    app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade)$"))
     app.add_handler(CallbackQueryHandler(delete_trade_callback, pattern="^del_trade_"))
     app.add_handler(CallbackQueryHandler(export_callback_handler, pattern="^export_"))
     app.add_handler(CallbackQueryHandler(inline_shortcut_router, pattern="^cmd_"))

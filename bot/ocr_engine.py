@@ -14,7 +14,12 @@ import requests
 
 PROMPT_TEXT = """
 You are an expert financial trade screenshot OCR parser. Analyze this MetaTrader 5 (MT5) history screenshot carefully.
-Extract all trade records visible in the image.
+Extract every individual closed-trade row visible in the image. Do not stop after the first row.
+Ignore account summary fields such as total Profit, Deposit, Withdrawal, Swap, Commission, and Balance;
+they are not individual trades. Do not treat the account's total profit as a trade's profit.
+For a history list, create one object per trade row, preserving the order shown. Read each row's
+symbol, buy/sell side, lot size, open and close prices, close time, and row-level profit separately.
+If the screenshot shows multiple trade rows, the JSON array must contain all of them.
 
 Return ONLY a valid JSON array of objects with the following fields for each trade:
 [

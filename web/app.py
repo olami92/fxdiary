@@ -57,7 +57,7 @@ async def _run_telegram_bot_background(token: str):
         bot_app.add_handler(CommandHandler("manual_trade", manual_trade_command))
         bot_app.add_handler(CommandHandler("export", export_command))
         bot_app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
-        bot_app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(confirm_save_trade|discard_pending_trade)$"))
+        bot_app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade)$"))
         bot_app.add_handler(CallbackQueryHandler(delete_trade_callback, pattern="^del_trade_"))
         bot_app.add_handler(CallbackQueryHandler(export_callback_handler, pattern="^export_"))
         bot_app.add_handler(CallbackQueryHandler(inline_shortcut_router, pattern="^cmd_"))
