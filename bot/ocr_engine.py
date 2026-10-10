@@ -66,9 +66,6 @@ def _parse_with_gemini(image_path: str, api_key: str) -> List[Dict[str, Any]]:
     
     encoded_image = base64.b64encode(img_bytes).decode("utf-8")
     
-    # Try gemini-1.5-flash or gemini-2.5-flash endpoint
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-    
     payload = {
         "contents": [
             {
@@ -89,9 +86,28 @@ def _parse_with_gemini(image_path: str, api_key: str) -> List[Dict[str, Any]]:
         }
     }
 
-    response = requests.post(url, json=payload, timeout=25)
-    response.raise_for_status()
-    data = response.json()
+    # Tested working models for this API key: gemini-3.5-flash, gemini-3.1-flash-lite, gemini-flash-latest
+    candidate_models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"]
+    data = None
+    last_err = None
+
+    for model_name in candidate_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+        try:
+            response = requests.post(url, json=payload, timeout=25)
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Gemini Vision successfully responded with model {model_name}")
+                break
+            else:
+                last_err = f"{model_name} HTTP {response.status_code}: {response.text[:120]}"
+                logger.warning(f"Gemini API returned error: {last_err}")
+        except Exception as req_err:
+            last_err = str(req_err)
+            logger.warning(f"Error calling {model_name}: {req_err}")
+
+    if not data:
+        raise RuntimeError(f"All Gemini models failed: {last_err}")
     
     try:
         raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
