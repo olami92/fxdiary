@@ -1,0 +1,26 @@
+# Environment & Secrets (NEVER COMMIT)
+.env
+credentials/*.json
+!credentials/google_credentials.json.example
+
+# Database & Uploads
+data/*.db
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Python Virtual Environment
+venv/
+ENV/
+env/
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# OS / IDE Junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
