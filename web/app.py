@@ -5,8 +5,10 @@ import asyncio
 import datetime
 import hashlib
 import hmac
+import json
 import secrets
 import time
+from urllib.parse import parse_qsl
 from pathlib import Path
 from typing import List, Optional
 from fastapi import FastAPI, Request, File, UploadFile, HTTPException
@@ -111,6 +113,41 @@ def _verified_telegram_user(auth_data: dict) -> dict:
     return auth_data
 
 
+def _verified_mini_app_user(init_data: str) -> dict:
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not bot_token or not isinstance(init_data, str) or not init_data:
+        raise HTTPException(status_code=401, detail="Telegram Mini App sign-in is not available.")
+
+    try:
+        if len(init_data) > 8192:
+            raise ValueError("sign-in data too large")
+        pairs = parse_qsl(init_data, keep_blank_values=True, strict_parsing=True, max_num_fields=64)
+        fields = dict(pairs)
+        if len(fields) != len(pairs):
+            raise ValueError("duplicate fields")
+        auth_date = int(fields.get("auth_date", 0))
+        user_data = json.loads(fields.get("user", "{}"))
+        user_id = int(user_data.get("id", 0))
+        received_hash = fields.get("hash", "")
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=401, detail="Invalid Telegram Mini App sign-in data.")
+
+    now = time.time()
+    if user_id <= 0 or auth_date > now + 30 or now - auth_date > 86400:
+        raise HTTPException(status_code=401, detail="Telegram Mini App sign-in data has expired or is invalid.")
+
+    data_check_string = "\n".join(
+        f"{key}={value}"
+        for key, value in sorted(fields.items())
+        if key != "hash"
+    )
+    secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+    expected_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+    if not received_hash or not hmac.compare_digest(expected_hash, received_hash):
+        raise HTTPException(status_code=401, detail="Telegram Mini App sign-in could not be verified.")
+    return user_data
+
+
 async def _require_dashboard_user(request: Request):
     user_id = request.session.get("telegram_id")
     if not user_id:
@@ -126,6 +163,18 @@ async def _require_dashboard_user(request: Request):
 async def telegram_login(request: Request):
     auth_data = await request.json()
     user_data = _verified_telegram_user(auth_data)
+    request.session.clear()
+    request.session["telegram_id"] = int(user_data["id"])
+    request.session["username"] = user_data.get("username")
+    request.session["first_name"] = user_data.get("first_name")
+    user = await _require_dashboard_user(request)
+    return {"id": user.telegram_id, "first_name": user.first_name, "username": user.username}
+
+
+@app.post("/api/auth/telegram-miniapp")
+async def telegram_mini_app_login(request: Request):
+    payload = await request.json()
+    user_data = _verified_mini_app_user(payload.get("init_data") if isinstance(payload, dict) else None)
     request.session.clear()
     request.session["telegram_id"] = int(user_data["id"])
     request.session["username"] = user_data.get("username")

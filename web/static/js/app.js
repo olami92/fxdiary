@@ -9,6 +9,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function initializeDashboard() {
   try {
+    const telegramApp = window.Telegram?.WebApp;
+    if (telegramApp?.initData) {
+      telegramApp.ready();
+      telegramApp.expand();
+      const loginResponse = await fetch("/api/auth/telegram-miniapp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ init_data: telegramApp.initData })
+      });
+      const user = await loginResponse.json();
+      if (!loginResponse.ok) throw new Error(user.detail || "Telegram Mini App sign-in failed.");
+      showDashboard(user);
+      loadDashboardData();
+      return;
+    }
+
     const response = await fetch("/api/auth/me");
     if (!response.ok) return showSignIn();
     const user = await response.json();
