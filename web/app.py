@@ -60,7 +60,7 @@ async def _run_telegram_bot_background(token: str):
         await bot_app.updater.start_polling(drop_pending_updates=True)
         logger.info("Telegram Bot active and polling!")
     except Exception as e:
-        logger.error(f"Error starting Telegram Bot: {e}", exc_info=True)
+        logger.warning(f"Telegram Bot polling warning: {e}. If another instance is running, only one can poll at a time.")
 
 @app.on_event("startup")
 async def startup_event():
