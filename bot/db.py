@@ -110,6 +110,36 @@ async def update_user_sheet(telegram_id: int, google_sheet_id: str, sheet_title:
             return True
         return False
 
+def parse_datetime_safe(val: Any, default_now: bool = False) -> Optional[datetime.datetime]:
+    """Parse dates from string or date objects safely into datetime.datetime."""
+    if isinstance(val, datetime.datetime):
+        return val
+    if isinstance(val, datetime.date):
+        return datetime.datetime.combine(val, datetime.time.min)
+    if isinstance(val, str) and val.strip():
+        val_str = val.strip()
+        for fmt in [
+            "%Y-%m-%d %H:%M:%S",
+            "%Y.%m.%d %H:%M:%S",
+            "%Y/%m/%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y.%m.%d %H:%M",
+            "%Y/%m/%d %H:%M",
+            "%Y-%m-%d",
+            "%Y.%m.%d",
+        ]:
+            try:
+                return datetime.datetime.strptime(val_str, fmt)
+            except ValueError:
+                continue
+        try:
+            return datetime.datetime.fromisoformat(val_str.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    if default_now:
+        return datetime.datetime.utcnow()
+    return None
+
 async def add_trade(telegram_id: int, trade_data: Dict[str, Any]) -> Trade:
     """Save a new trade to the database."""
     async with AsyncSessionLocal() as session:
@@ -128,9 +158,15 @@ async def add_trade(telegram_id: int, trade_data: Dict[str, Any]) -> Trade:
         commission = float(trade_data.get("commission", 0.0))
         net_profit = trade_data.get("net_profit", gross_profit + swap + commission)
 
+        ticket_raw = trade_data.get("ticket")
+        ticket_str = str(ticket_raw) if ticket_raw is not None else None
+
+        open_time = parse_datetime_safe(trade_data.get("open_time"), default_now=False)
+        close_time = parse_datetime_safe(trade_data.get("close_time"), default_now=True)
+
         trade = Trade(
             user_id=telegram_id,
-            ticket=trade_data.get("ticket"),
+            ticket=ticket_str,
             symbol=symbol,
             trade_type=trade_type,
             volume=float(trade_data.get("volume", 0.01)),
@@ -143,8 +179,8 @@ async def add_trade(telegram_id: int, trade_data: Dict[str, Any]) -> Trade:
             commission=commission,
             net_profit=net_profit,
             pips=pips,
-            open_time=trade_data.get("open_time"),
-            close_time=trade_data.get("close_time", datetime.datetime.utcnow()),
+            open_time=open_time,
+            close_time=close_time,
             screenshot_path=trade_data.get("screenshot_path"),
             notes=trade_data.get("notes"),
             synced_to_sheet=trade_data.get("synced_to_sheet", False)
