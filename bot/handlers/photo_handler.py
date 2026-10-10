@@ -7,7 +7,6 @@ from telegram.ext import ContextTypes
 from bot.config import UPLOADS_DIR, GEMINI_API_KEY
 from bot.ocr_engine import parse_mt5_screenshot
 from bot.db import get_or_create_user, add_trade, calculate_pips
-from bot.gsheet_service import append_trade_to_google_sheet
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +70,12 @@ async def photo_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
             f"• <b>Ticket:</b> <code>{trade.get('ticket') or 'Auto'}</code>\n"
             f"• <b>Date/Time:</b> <code>{trade.get('close_time')}</code>\n"
             f"───────────────────\n"
-            f"Would you like to record this trade in your diary and Google Sheet?"
+            f"Would you like to save this trade to your trading diary?"
         )
 
         keyboard = [
             [
-                InlineKeyboardButton("✅ Save to Sheet & DB", callback_data="confirm_save_trade"),
+                InlineKeyboardButton("✅ Save to Diary", callback_data="confirm_save_trade"),
                 InlineKeyboardButton("✏️ Edit PnL", callback_data="prompt_edit_pnl")
             ],
             [
@@ -115,18 +114,13 @@ async def callback_trade_action(update: Update, context: ContextTypes.DEFAULT_TY
         # 1. Save to SQLite DB
         saved_trade = await add_trade(user.id, trade_data)
 
-        # 2. Append to Google Sheet if connected
-        sheet_synced = False
-        if db_user.google_sheet_id:
-            sheet_synced = await append_trade_to_google_sheet(db_user.google_sheet_id, trade_data)
-
-        synced_note = "✅ <b>Saved to Google Sheet & Local Journal!</b>" if sheet_synced else "✅ <b>Saved to Local Journal!</b> (Connect sheet with /connect_sheet to sync online)"
+        saved_note = "✅ <b>Saved to your trading diary.</b>"
 
         pnl = saved_trade.net_profit
         pnl_symbol = "🟢 +" if pnl >= 0 else "🔴 -"
 
         done_text = (
-            f"{synced_note}\n\n"
+            f"{saved_note}\n\n"
             f"📊 <b>Trade Logged:</b> <code>{saved_trade.symbol}</code> {saved_trade.trade_type} {saved_trade.volume} lots\n"
             f"💰 <b>Net PnL:</b> {pnl_symbol}${abs(pnl):,.2f}\n"
             f"📈 <b>Pips:</b> {saved_trade.pips:+} pips"
