@@ -41,7 +41,7 @@ async def _run_telegram_bot_background(token: str):
     """Run Telegram bot polling in a non-blocking background task."""
     from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
     from bot.handlers.start_handler import start_command, help_command
-    from bot.handlers.photo_handler import photo_message_handler, callback_trade_action
+    from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler
     from bot.handlers.stats_handler import stats_command
     from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
     from bot.handlers.export_handler import export_command, export_callback_handler
@@ -57,7 +57,8 @@ async def _run_telegram_bot_background(token: str):
         bot_app.add_handler(CommandHandler("manual_trade", manual_trade_command))
         bot_app.add_handler(CommandHandler("export", export_command))
         bot_app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
-        bot_app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade)$"))
+        bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry_message_handler))
+        bot_app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade|retry_ocr|manual_entry)$"))
         bot_app.add_handler(CallbackQueryHandler(delete_trade_callback, pattern="^del_trade_"))
         bot_app.add_handler(CallbackQueryHandler(export_callback_handler, pattern="^export_"))
         bot_app.add_handler(CallbackQueryHandler(inline_shortcut_router, pattern="^cmd_"))

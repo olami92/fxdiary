@@ -9,7 +9,7 @@ from telegram.ext import (
 from bot.config import TELEGRAM_BOT_TOKEN
 from bot.db import init_db
 from bot.handlers.start_handler import start_command, help_command
-from bot.handlers.photo_handler import photo_message_handler, callback_trade_action
+from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler
 from bot.handlers.stats_handler import stats_command
 from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
 from bot.handlers.export_handler import export_command, export_callback_handler
@@ -64,9 +64,10 @@ def main():
 
     # Photo Screenshot Handler
     app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry_message_handler))
 
     # Callback Query Handlers
-    app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade)$"))
+    app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade|retry_ocr|manual_entry)$"))
     app.add_handler(CallbackQueryHandler(delete_trade_callback, pattern="^del_trade_"))
     app.add_handler(CallbackQueryHandler(export_callback_handler, pattern="^export_"))
     app.add_handler(CallbackQueryHandler(inline_shortcut_router, pattern="^cmd_"))
