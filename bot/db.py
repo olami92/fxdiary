@@ -59,7 +59,13 @@ class Trade(Base):
 
     user: Mapped["User"] = relationship("User", back_populates="trades")
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine_options = {"echo": False, "pool_pre_ping": True}
+if DATABASE_URL.startswith("postgresql+asyncpg://"):
+    # Supabase's transaction pooler may reuse connections across transactions.
+    # Disabling asyncpg's per-connection prepared statement cache keeps that safe.
+    engine_options["connect_args"] = {"statement_cache_size": 0}
+
+engine = create_async_engine(DATABASE_URL, **engine_options)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 async def init_db():

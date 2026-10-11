@@ -108,6 +108,12 @@ WEB_APP_URL=http://localhost:8000
 
 For Telegram dashboard sign-in, set `TELEGRAM_BOT_USERNAME` to the bot username without `@` and set a long, random `SESSION_SECRET`. In @BotFather, link the dashboard's domain to the same bot with `/setdomain`. Set the same variables in Render's environment settings.
 
+### Supabase database on Render
+
+The app uses SQLite locally by default. To keep production data across Render deploys without a paid Render disk, create a Supabase project and copy its PostgreSQL connection string. In Supabase, choose **Connect** and use the **Session pooler** connection string when available. In Render, open the `fxdiary` service's **Environment** settings and set `DATABASE_URL` to that connection string. Keep it private; do not commit it to GitHub. The app converts standard `postgres://` and `postgresql://` URLs to SQLAlchemy's async PostgreSQL driver automatically. On startup, it creates the app tables if they do not already exist.
+
+Supabase's free project has database size and inactivity limits; check its current plan details. Existing SQLite records are not copied automatically, so export/import them before switching if you need to preserve data already stored in a database.
+
 ---
 
 ## 💻 Running the Application
