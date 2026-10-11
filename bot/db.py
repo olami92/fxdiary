@@ -208,6 +208,14 @@ async def get_user_trades(telegram_id: int, limit: int = 100, offset: int = 0) -
         )
         return list(result.scalars().all())
 
+async def count_user_trades(telegram_id: int) -> int:
+    """Return the total number of trades belonging to one user."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(func.count(Trade.id)).where(Trade.user_id == telegram_id)
+        )
+        return int(result.scalar_one())
+
 async def delete_user_trade(telegram_id: int, trade_id: int) -> bool:
     """Delete a trade by ID for a user."""
     async with AsyncSessionLocal() as session:

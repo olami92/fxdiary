@@ -246,6 +246,33 @@ header {
   overflow-x: auto;
 }
 
+.trade-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 4px 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.trade-pagination-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.trade-pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 540px) {
+  .trade-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

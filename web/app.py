@@ -11,7 +11,7 @@ import time
 from urllib.parse import parse_qsl
 from pathlib import Path
 from typing import List, Optional
-from fastapi import FastAPI, Request, File, UploadFile, HTTPException
+from fastapi import FastAPI, Request, File, UploadFile, HTTPException, Query
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from bot.config import UPLOADS_DIR, GEMINI_API_KEY, HOST, PORT
-from bot.db import init_db, get_or_create_user, get_user_trades, add_trade, delete_user_trade, AsyncSessionLocal
+from bot.db import init_db, get_or_create_user, get_user_trades, count_user_trades, add_trade, delete_user_trade, AsyncSessionLocal
 from bot.analytics import calculate_stats, generate_equity_chart
 from bot.ocr_engine import parse_mt5_screenshot
 from bot.export_engine import generate_pdf_report, generate_excel_report
@@ -212,10 +212,16 @@ async def get_stats(request: Request):
     })
 
 @app.get("/api/trades")
-async def list_trades(request: Request):
-    """Fetch list of recent trades."""
+async def list_trades(request: Request, page: int = Query(1, ge=1)):
+    """Fetch one page of the signed-in user's trade history."""
     user = await _require_dashboard_user(request)
-    trades = await get_user_trades(user.telegram_id, limit=100)
+    page_size = 20
+    total_trades = await count_user_trades(user.telegram_id)
+    total_pages = max(1, (total_trades + page_size - 1) // page_size)
+    page = min(page, total_pages)
+    trades = await get_user_trades(
+        user.telegram_id, limit=page_size, offset=(page - 1) * page_size
+    )
     result = []
     for t in trades:
         result.append({
@@ -231,7 +237,15 @@ async def list_trades(request: Request):
             "net_profit": t.net_profit,
             "close_time": t.close_time.strftime("%Y-%m-%d %H:%M") if t.close_time else "-"
         })
-    return JSONResponse(content={"trades": result})
+    return JSONResponse(content={
+        "trades": result,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_trades": total_trades,
+            "total_pages": total_pages,
+        },
+    })
 
 @app.post("/api/upload-screenshot")
 async def upload_screenshot(request: Request, file: UploadFile = File(...)):

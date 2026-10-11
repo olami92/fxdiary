@@ -1,5 +1,7 @@
 let equityChart = null;
 let winLossChart = null;
+let currentTradesPage = 1;
+const tradesPageSize = 20;
 
 document.addEventListener("DOMContentLoaded", () => {
   initCharts();
@@ -70,11 +72,11 @@ function showDashboard(user) {
   document.getElementById("account-name").textContent = `👤 ${name}`;
 }
 
-async function loadDashboardData() {
+async function loadDashboardData(page = currentTradesPage) {
   try {
     const [statsRes, tradesRes] = await Promise.all([
       fetch("/api/stats"),
-      fetch("/api/trades")
+      fetch(`/api/trades?page=${page}`)
     ]);
 
     if (statsRes.status === 401 || tradesRes.status === 401) return showSignIn();
@@ -83,8 +85,9 @@ async function loadDashboardData() {
     const tradesData = await tradesRes.json();
 
     renderStats(statsData.stats);
-    renderTrades(tradesData.trades);
-    updateCharts(tradesData.trades, statsData.stats);
+    currentTradesPage = tradesData.pagination.page;
+    renderTrades(tradesData.trades, tradesData.pagination);
+    if (currentTradesPage === 1) updateCharts(tradesData.trades, statsData.stats);
 
   } catch (err) {
     console.error("Failed to load dashboard data:", err);
@@ -112,33 +115,45 @@ function renderStats(stats) {
   document.getElementById("best-symbol").textContent = stats.best_symbol || "N/A";
 }
 
-function renderTrades(trades) {
+function renderTrades(trades, pagination) {
   const tbody = document.getElementById("trades-tbody");
   if (!tbody) return;
 
   if (!trades || trades.length === 0) {
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-secondary);">No trades logged yet. Upload an MT5 screenshot or add a manual trade!</td></tr>`;
-    return;
+  } else {
+    tbody.innerHTML = trades.map((t) => {
+      const pnl = t.net_profit || 0;
+      const pnlClass = pnl >= 0 ? "badge-win" : "badge-loss";
+      const typeClass = t.trade_type === "BUY" ? "badge-buy" : "badge-sell";
+
+      return `
+        <tr>
+          <td>#${t.ticket || t.id}</td>
+          <td><b>${t.symbol}</b></td>
+          <td><span class="badge ${typeClass}">${t.trade_type}</span></td>
+          <td>${t.volume.toFixed(2)}</td>
+          <td>${t.open_price} → ${t.close_price}</td>
+          <td>${t.pips >= 0 ? '+' : ''}${t.pips} pips</td>
+          <td><span class="badge ${pnlClass}">${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}</span></td>
+          <td>${t.close_time}</td>
+        </tr>
+      `;
+    }).join("");
   }
 
-  tbody.innerHTML = trades.map((t, idx) => {
-    const pnl = t.net_profit || 0;
-    const pnlClass = pnl >= 0 ? "badge-win" : "badge-loss";
-    const typeClass = t.trade_type === "BUY" ? "badge-buy" : "badge-sell";
-
-    return `
-      <tr>
-        <td>#${t.ticket || t.id}</td>
-        <td><b>${t.symbol}</b></td>
-        <td><span class="badge ${typeClass}">${t.trade_type}</span></td>
-        <td>${t.volume.toFixed(2)}</td>
-        <td>${t.open_price} → ${t.close_price}</td>
-        <td>${t.pips >= 0 ? '+' : ''}${t.pips} pips</td>
-        <td><span class="badge ${pnlClass}">${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}</span></td>
-        <td>${t.close_time}</td>
-      </tr>
-    `;
-  }).join("");
+  const paginationEl = document.getElementById("trade-pagination");
+  const infoEl = document.getElementById("trade-page-info");
+  const prevButton = document.getElementById("trade-prev-page");
+  const nextButton = document.getElementById("trade-next-page");
+  if (paginationEl && pagination) {
+    paginationEl.hidden = pagination.total_pages <= 1;
+    infoEl.textContent = pagination.total_trades
+      ? `Showing ${(pagination.page - 1) * pagination.page_size + 1}–${Math.min(pagination.page * pagination.page_size, pagination.total_trades)} of ${pagination.total_trades} trades · Page ${pagination.page} of ${pagination.total_pages}`
+      : "No trades";
+    prevButton.disabled = pagination.page <= 1;
+    nextButton.disabled = pagination.page >= pagination.total_pages;
+  }
 }
 
 function initCharts() {
@@ -223,6 +238,13 @@ function updateCharts(trades, stats) {
 }
 
 function setupEventListeners() {
+  document.getElementById("trade-prev-page")?.addEventListener("click", () => {
+    if (currentTradesPage > 1) loadDashboardData(currentTradesPage - 1);
+  });
+  document.getElementById("trade-next-page")?.addEventListener("click", () => {
+    loadDashboardData(currentTradesPage + 1);
+  });
+
   document.getElementById("logout-button")?.addEventListener("click", async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     showSignIn();
