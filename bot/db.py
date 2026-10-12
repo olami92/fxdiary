@@ -8,7 +8,7 @@ import datetime
 import re
 from typing import List, Optional, Dict, Any
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, ForeignKey, BigInteger, Text, Boolean, UniqueConstraint, select, func
+    Column, Integer, String, Float, DateTime, ForeignKey, BigInteger, Text, Boolean, UniqueConstraint, select, func, update
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import inspect, text
@@ -308,6 +308,20 @@ async def set_user_opening_capital(telegram_id: int, amount: float) -> Optional[
         await session.commit()
         await session.refresh(user)
         return user
+
+async def add_user_deposit(telegram_id: int, amount: float) -> Optional[float]:
+    """Increase a user's contributed account capital by a deposit amount."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            update(User)
+            .where(User.telegram_id == telegram_id)
+            .values(opening_capital=User.opening_capital + float(amount))
+        )
+        if result.rowcount == 0:
+            return None
+        await session.commit()
+        refreshed = await session.execute(select(User.opening_capital).where(User.telegram_id == telegram_id))
+        return float(refreshed.scalar_one())
 
 async def get_most_traded_currencies() -> Dict[int, set[str]]:
     """Get the most frequently traded currency exposure for each Telegram user."""

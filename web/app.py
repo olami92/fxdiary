@@ -42,7 +42,7 @@ async def _run_telegram_bot_background(token: str):
     """Run Telegram bot polling in a non-blocking background task."""
     from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
     from bot.handlers.start_handler import start_command, help_command
-    from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler, open_trade_command
+    from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler, open_trade_command, deposit_command
     from bot.handlers.voice_handler import voice_message_handler
     from bot.handlers.stats_handler import stats_command
     from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
@@ -58,6 +58,7 @@ async def _run_telegram_bot_background(token: str):
         bot_app.add_handler(CommandHandler("stats", stats_command))
         bot_app.add_handler(CommandHandler("trades", trades_command))
         bot_app.add_handler(CommandHandler("open_trade", open_trade_command))
+        bot_app.add_handler(CommandHandler("deposit", deposit_command))
         bot_app.add_handler(CommandHandler("manual_trade", manual_trade_command))
         bot_app.add_handler(CommandHandler("export", export_command))
         bot_app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))

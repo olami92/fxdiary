@@ -6,6 +6,8 @@ import hashlib
 import html
 import json
 import logging
+import time
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -21,15 +23,68 @@ logger = logging.getLogger(__name__)
 CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 CHECK_INTERVAL_SECONDS = 15 * 60
 ALERT_WINDOW_MINUTES = 30
+MAX_RETRY_SECONDS = 6 * 60 * 60
+_calendar_cache: List[Dict[str, Any]] = []
+_next_fetch_at = 0.0
+_retry_delay = CHECK_INTERVAL_SECONDS
 
 
 def _fetch_calendar() -> List[Dict[str, Any]]:
-    response = requests.get(CALENDAR_URL, timeout=20, headers={"User-Agent": "FXDiary/1.0"})
-    response.raise_for_status()
-    data = response.json()
-    if not isinstance(data, list):
-        raise ValueError("Economic calendar did not return a JSON event list.")
-    return [event for event in data if isinstance(event, dict)]
+    """Fetch events with a process-local cache and backoff for provider failures."""
+    global _calendar_cache, _next_fetch_at, _retry_delay
+    now = time.monotonic()
+    if now < _next_fetch_at:
+        return _calendar_cache
+
+    try:
+        response = requests.get(CALENDAR_URL, timeout=20, headers={"User-Agent": "MyFXkeeper/1.0"})
+        if response.status_code == 429:
+            retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+            delay = max(retry_after or 0, _retry_delay)
+            _next_fetch_at = now + delay
+            _retry_delay = min(max(_retry_delay * 2, CHECK_INTERVAL_SECONDS), MAX_RETRY_SECONDS)
+            logger.warning(
+                "Economic calendar provider rate-limited requests (HTTP 429); "
+                "using %s cached events and retrying in about %d minutes.",
+                len(_calendar_cache), max(1, delay // 60),
+            )
+            return _calendar_cache
+
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, list):
+            raise ValueError("Economic calendar did not return a JSON event list.")
+        _calendar_cache = [event for event in data if isinstance(event, dict)]
+        _next_fetch_at = now + CHECK_INTERVAL_SECONDS
+        _retry_delay = CHECK_INTERVAL_SECONDS
+        return _calendar_cache
+    except Exception as error:
+        # Use stale events if the provider is temporarily unavailable. This keeps
+        # the alert loop useful without hammering an endpoint that is failing.
+        _next_fetch_at = now + _retry_delay
+        _retry_delay = min(max(_retry_delay * 2, CHECK_INTERVAL_SECONDS), MAX_RETRY_SECONDS)
+        logger.warning(
+            "Economic calendar fetch failed (%s); using %s cached events and "
+            "retrying in about %d minutes.",
+            error, len(_calendar_cache), max(1, (_next_fetch_at - now) // 60),
+        )
+        return _calendar_cache
+
+
+def _retry_after_seconds(value: Optional[str]) -> Optional[int]:
+    """Parse Retry-After as seconds or an HTTP date."""
+    if not value:
+        return None
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=datetime.timezone.utc)
+            return max(0, int((retry_at - datetime.datetime.now(datetime.timezone.utc)).total_seconds()))
+        except (TypeError, ValueError, OverflowError):
+            return None
 
 
 def _event_datetime(event: Dict[str, Any]) -> Optional[datetime.datetime]:

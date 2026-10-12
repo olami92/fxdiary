@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceRe
 from telegram.ext import ContextTypes
 from bot.config import UPLOADS_DIR, GEMINI_API_KEY
 from bot.ocr_engine import parse_mt5_screenshot
-from bot.db import get_or_create_user, add_trade, calculate_pips, get_open_user_trades, close_user_trade
+from bot.db import get_or_create_user, add_trade, calculate_pips, get_open_user_trades, close_user_trade, add_user_deposit
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +198,11 @@ async def manual_entry_message_handler(update: Update, context: ContextTypes.DEF
     message = update.message
     user = update.effective_user
     if not message or not message.text or not user or not context.user_data.get("awaiting_manual_entry"):
-        if message and message.text and user and context.user_data.get("open_trade_close_flow"):
-            await _handle_open_trade_close_reply(update, context)
+        if message and message.text and user:
+            if context.user_data.get("awaiting_deposit"):
+                await _complete_deposit(message, user.id, context)
+            elif context.user_data.get("open_trade_close_flow"):
+                await _handle_open_trade_close_reply(update, context)
         return
 
     fields = {}
@@ -275,6 +278,45 @@ async def open_trade_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_html(
         f"📂 <b>Your open trades ({len(trades)})</b>\nChoose a trade to close:",
         reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
+async def deposit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Record an account deposit and add it to the user's opening capital."""
+    user = update.effective_user
+    if not user or not update.message:
+        return
+    await get_or_create_user(user.id, user.username, user.first_name)
+    if not context.args:
+        context.user_data["awaiting_deposit"] = True
+        await update.message.reply_text(
+            "How much did you deposit? Send the amount in USD, for example 250 or 250.50.",
+            reply_markup=ForceReply(selective=True, input_field_placeholder="Deposit amount in USD"),
+        )
+        return
+    await _complete_deposit(update.message, user.id, context, " ".join(context.args))
+
+
+async def _complete_deposit(message, telegram_id: int, context: ContextTypes.DEFAULT_TYPE, raw_amount: str = None):
+    raw_amount = raw_amount if raw_amount is not None else message.text
+    normalized = re.sub(r"^(?:USD\s*|\$\s*)", "", str(raw_amount).strip(), flags=re.IGNORECASE)
+    normalized = normalized.replace(",", "")
+    if not re.fullmatch(r"\+?(?:\d+(?:\.\d*)?|\.\d+)", normalized):
+        await message.reply_text("Please enter a valid positive deposit amount, such as 250 or 250.50.")
+        return
+    amount = float(normalized)
+    if not math.isfinite(amount) or amount <= 0:
+        await message.reply_text("Deposit amount must be greater than zero.")
+        return
+    total_capital = await add_user_deposit(telegram_id, amount)
+    context.user_data.pop("awaiting_deposit", None)
+    if total_capital is None:
+        await message.reply_text("I couldn't find your account. Please run /start and try again.")
+        return
+    await message.reply_html(
+        f"✅ Deposit of <b>${amount:,.2f}</b> recorded.\n"
+        f"Your opening capital is now <b>${total_capital:,.2f}</b>. "
+        "Your dashboard balance includes this capital and your realized trade P&amp;L."
     )
 
 
