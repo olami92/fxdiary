@@ -10,6 +10,7 @@ from sqlalchemy import (
     Column, Integer, String, Float, DateTime, ForeignKey, BigInteger, Text, Boolean, select, func
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from bot.config import DATABASE_URL
 
@@ -52,6 +53,7 @@ class Trade(Base):
     pips: Mapped[float] = mapped_column(Float, default=0.0)
     open_time: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
     close_time: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="CLOSED")
     screenshot_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     synced_to_sheet: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -72,6 +74,13 @@ async def init_db():
     """Create all database tables."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_ensure_trade_status_column)
+
+def _ensure_trade_status_column(connection):
+    """Add trade status to databases created before open voice entries existed."""
+    columns = {column["name"] for column in inspect(connection).get_columns("trades")}
+    if "status" not in columns:
+        connection.execute(text("ALTER TABLE trades ADD COLUMN status VARCHAR(12) NOT NULL DEFAULT 'CLOSED'"))
 
 async def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None) -> User:
     """Retrieve existing user or create a new user entry."""
@@ -187,6 +196,7 @@ async def add_trade(telegram_id: int, trade_data: Dict[str, Any]) -> Trade:
             pips=pips,
             open_time=open_time,
             close_time=close_time,
+            status=str(trade_data.get("status", "CLOSED")).upper(),
             screenshot_path=trade_data.get("screenshot_path"),
             notes=trade_data.get("notes"),
             synced_to_sheet=trade_data.get("synced_to_sheet", False)

@@ -244,7 +244,8 @@ async def _show_pending_trade(message, context: ContextTypes.DEFAULT_TYPE, index
     trade_type = str(trade.get("trade_type", "BUY"))
     open_price = trade.get("open_price", 0.0)
     close_price = trade.get("close_price", 0.0)
-    pips = calculate_pips(symbol, trade_type, open_price, close_price)
+    is_open = str(trade.get("status", "CLOSED")).upper() == "OPEN"
+    pips = calculate_pips(symbol, trade_type, open_price, close_price) if not is_open else 0.0
     trade["pips"] = pips
     pnl = float(trade.get("net_profit", trade.get("profit", 0.0)))
     pnl_symbol = "🟢 +" if pnl >= 0 else "🔴 -"
@@ -256,11 +257,14 @@ async def _show_pending_trade(message, context: ContextTypes.DEFAULT_TYPE, index
         f"• <b>Type:</b> <b>{html.escape(trade_type)}</b>\n"
         f"• <b>Volume (Lots):</b> <code>{trade.get('volume', 0.01)}</code>\n"
         f"• <b>Open Price:</b> <code>{open_price}</code>\n"
-        f"• <b>Close Price:</b> <code>{close_price}</code>\n"
-        f"• <b>Pips:</b> <code>{pips:+} pips</code>\n"
-        f"• <b>Net PnL:</b> <b>{pnl_symbol}${abs(pnl):,.2f}</b>\n"
+        f"• <b>Close Price:</b> <code>{'Open position' if is_open else close_price}</code>\n"
+        f"• <b>Pips:</b> <code>{'Pending close' if is_open else f'{pips:+} pips'}</code>\n"
+        f"• <b>Net PnL:</b> <b>{'Not realized' if is_open else f'{pnl_symbol}${abs(pnl):,.2f}'}</b>\n"
         f"• <b>Ticket:</b> <code>{html.escape(str(trade.get('ticket') or 'Auto'))}</code>\n"
-        f"• <b>Date/Time:</b> <code>{html.escape(str(trade.get('close_time') or 'N/A'))}</code>\n"
+        f"• <b>Date/Time:</b> <code>{html.escape(str(trade.get('close_time') or ('Open position' if is_open else 'N/A')))}</code>\n"
+        f"• <b>Stop Loss:</b> <code>{html.escape(str(trade.get('sl') or 'Not set'))}</code>\n"
+        f"• <b>Take Profit:</b> <code>{html.escape(str(trade.get('tp') or 'Not set'))}</code>\n"
+        f"• <b>Status:</b> <code>{html.escape(str(trade.get('status') or 'CLOSED').upper())}</code>\n"
         f"───────────────────\n"
         f"Save this trade to your diary or skip to the next one?"
     )
@@ -285,7 +289,7 @@ async def _advance_pending_trade(message, context: ContextTypes.DEFAULT_TYPE, ne
     skipped = context.user_data.get("skipped_trade_count", 0)
     _clear_pending_trades(context)
     await message.edit_message_text(
-        f"✅ <b>Screenshot review complete.</b>\n\n"
+        f"✅ <b>Trade review complete.</b>\n\n"
         f"Saved: <b>{saved}</b>\nSkipped: <b>{skipped}</b>",
         parse_mode="HTML",
     )

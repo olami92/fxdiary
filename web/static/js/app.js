@@ -120,23 +120,25 @@ function renderTrades(trades, pagination) {
   if (!tbody) return;
 
   if (!trades || trades.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:32px; color:var(--text-secondary);">No trades logged yet. Upload an MT5 screenshot or add a manual trade!</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:32px; color:var(--text-secondary);">No trades logged yet. Upload an MT5 screenshot or add a manual trade!</td></tr>`;
   } else {
     tbody.innerHTML = trades.map((t) => {
       const pnl = t.net_profit || 0;
+      const isOpen = t.status === "OPEN";
       const pnlClass = pnl >= 0 ? "badge-win" : "badge-loss";
       const typeClass = t.trade_type === "BUY" ? "badge-buy" : "badge-sell";
 
       return `
         <tr>
           <td>#${t.ticket || t.id}</td>
+          <td><span class="badge ${isOpen ? "badge-open" : "badge-closed"}">${isOpen ? "OPEN" : "CLOSED"}</span></td>
           <td><b>${t.symbol}</b></td>
           <td><span class="badge ${typeClass}">${t.trade_type}</span></td>
           <td>${t.volume.toFixed(2)}</td>
-          <td>${t.open_price} → ${t.close_price}</td>
-          <td>${t.pips >= 0 ? '+' : ''}${t.pips} pips</td>
-          <td><span class="badge ${pnlClass}">${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}</span></td>
-          <td>${t.close_time}</td>
+          <td>${t.open_price} → ${isOpen ? "Open" : t.close_price}</td>
+          <td>${isOpen ? "—" : `${t.pips >= 0 ? '+' : ''}${t.pips} pips`}</td>
+          <td>${isOpen ? "—" : `<span class="badge ${pnlClass}">${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}</span>`}</td>
+          <td>${isOpen ? "Open position" : t.close_time}</td>
         </tr>
       `;
     }).join("");

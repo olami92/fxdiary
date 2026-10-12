@@ -10,6 +10,7 @@ from bot.config import TELEGRAM_BOT_TOKEN
 from bot.db import init_db
 from bot.handlers.start_handler import start_command, help_command
 from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler
+from bot.handlers.voice_handler import voice_message_handler
 from bot.handlers.stats_handler import stats_command
 from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
 from bot.handlers.export_handler import export_command, export_callback_handler
@@ -64,6 +65,7 @@ def main():
 
     # Photo Screenshot Handler
     app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_message_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry_message_handler))
 
     # Callback Query Handlers

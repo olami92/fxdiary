@@ -310,6 +310,8 @@ tr:hover td {
 .badge-sell { background: rgba(239, 68, 68, 0.2); color: #FCA5A5; }
 .badge-win { background: rgba(16, 185, 129, 0.2); color: #34D399; }
 .badge-loss { background: rgba(239, 68, 68, 0.2); color: #FCA5A5; }
+.badge-open { background: rgba(245, 158, 11, 0.18); color: #FCD34D; }
+.badge-closed { background: rgba(148, 163, 184, 0.16); color: #CBD5E1; }
 
 /* Upload Modal & Zone */
 .upload-zone {
