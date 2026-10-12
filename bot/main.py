@@ -73,7 +73,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry_message_handler))
 
     # Callback Query Handlers
-    app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade|retry_ocr|manual_entry)$"))
+    app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade|retry_ocr|manual_entry|confirm_close_trade|cancel_close_trade|choose_close_trade:\\d+)$"))
     app.add_handler(CallbackQueryHandler(delete_trade_callback, pattern="^del_trade_"))
     app.add_handler(CallbackQueryHandler(export_callback_handler, pattern="^export_"))
     app.add_handler(CallbackQueryHandler(inline_shortcut_router, pattern="^cmd_"))

@@ -5,12 +5,14 @@ import datetime
 import logging
 from pathlib import Path
 
+import html
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from bot.config import GEMINI_API_KEY, UPLOADS_DIR
-from bot.db import get_or_create_user
-from bot.handlers.photo_handler import _queue_extracted_trades
+from bot.db import get_or_create_user, get_open_user_trades
+from bot.handlers.photo_handler import _queue_extracted_trades, _show_close_confirmation
 from bot.voice_engine import parse_voice_trade
 
 logger = logging.getLogger(__name__)
@@ -33,7 +35,10 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         telegram_file = await media.get_file()
         await telegram_file.download_to_drive(voice_path)
         trade = await asyncio.to_thread(parse_voice_trade, str(voice_path), mime_type, GEMINI_API_KEY)
-        await _queue_extracted_trades([trade], None, status_message, context)
+        if trade.get("action") == "CLOSE_EXISTING":
+            await _begin_voice_close(trade, user.id, status_message, context)
+        else:
+            await _queue_extracted_trades([trade], None, status_message, context)
     except ValueError as error:
         await _show_voice_failure(status_message, str(error))
     except Exception as error:
@@ -57,4 +62,39 @@ async def _show_voice_failure(message, explanation: str):
         f"❌ <b>Failed to generate result.</b>\n\n{explanation}",
         parse_mode="HTML",
         reply_markup=keyboard,
+    )
+
+
+async def _begin_voice_close(close_data, telegram_id: int, message, context: ContextTypes.DEFAULT_TYPE):
+    open_trades = await get_open_user_trades(
+        telegram_id,
+        symbol=close_data["symbol"],
+        ticket=close_data.get("ticket"),
+    )
+    if not open_trades:
+        ticket = close_data.get("ticket")
+        ticket_description = f" with ticket #{html.escape(str(ticket).lstrip('#'))}" if ticket else ""
+        await message.edit_text(
+            f"I couldn't find an open <b>{html.escape(close_data['symbol'])}</b> trade"
+            f"{ticket_description}.\n\n"
+            "No trade was changed. Check the symbol or ticket, or log the trade first.",
+            parse_mode="HTML",
+        )
+        return
+
+    if len(open_trades) == 1:
+        await _show_close_confirmation(message, open_trades[0], close_data, context)
+        return
+
+    context.user_data["pending_close_data"] = close_data
+    context.user_data.pop("pending_close_trade", None)
+    keyboard = []
+    for trade in open_trades[:8]:
+        label = f"#{trade.ticket or trade.id} · {trade.trade_type} {trade.volume:g} lots · entry {trade.open_price:g}"
+        keyboard.append([InlineKeyboardButton(label[:64], callback_data=f"choose_close_trade:{trade.id}")])
+    keyboard.append([InlineKeyboardButton("Cancel", callback_data="cancel_close_trade")])
+    await message.edit_text(
+        f"I found {len(open_trades)} open <b>{html.escape(close_data['symbol'])}</b> trades. Which one should I close?",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )

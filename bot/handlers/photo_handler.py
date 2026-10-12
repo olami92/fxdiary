@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceRe
 from telegram.ext import ContextTypes
 from bot.config import UPLOADS_DIR, GEMINI_API_KEY
 from bot.ocr_engine import parse_mt5_screenshot
-from bot.db import get_or_create_user, add_trade, calculate_pips
+from bot.db import get_or_create_user, add_trade, calculate_pips, get_open_user_trades, close_user_trade
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,56 @@ async def callback_trade_action(update: Update, context: ContextTypes.DEFAULT_TY
     data = query.data
     user = query.from_user
     await get_or_create_user(user.id, user.username, user.first_name)
+
+    if data == "cancel_close_trade":
+        context.user_data.pop("pending_close_data", None)
+        context.user_data.pop("pending_close_trade", None)
+        await query.edit_message_text("Trade close cancelled. The open trade was not changed.")
+        return
+
+    if data.startswith("choose_close_trade:"):
+        close_data = context.user_data.get("pending_close_data")
+        try:
+            trade_id = int(data.split(":", 1)[1])
+        except (IndexError, ValueError):
+            trade_id = 0
+        matches = await get_open_user_trades(
+            user.id,
+            symbol=close_data.get("symbol") if close_data else None,
+            ticket=close_data.get("ticket") if close_data else None,
+            trade_id=trade_id,
+        )
+        if not close_data or not matches:
+            context.user_data.pop("pending_close_data", None)
+            await query.edit_message_text("That open trade is no longer available to close. No trade was changed.")
+            return
+        await _show_close_confirmation(query.message, matches[0], close_data, context)
+        return
+
+    if data == "confirm_close_trade":
+        pending_close = context.user_data.get("pending_close_trade")
+        if not pending_close:
+            await query.edit_message_text("No trade close is waiting for confirmation.")
+            return
+        closed = await close_user_trade(
+            user.id,
+            int(pending_close["trade_id"]),
+            float(pending_close["close_price"]),
+            float(pending_close["net_profit"]),
+        )
+        context.user_data.pop("pending_close_trade", None)
+        if not closed:
+            await query.edit_message_text("This trade has already been closed or is no longer available.")
+            return
+        await query.edit_message_text(
+            f"✅ <b>Trade closed and updated.</b>\n\n"
+            f"• <b>Trade:</b> <code>{html.escape(closed.symbol)}</code> {closed.trade_type} {closed.volume:g} lots\n"
+            f"• <b>Prices:</b> {closed.open_price:g} → {closed.close_price:g}\n"
+            f"• <b>Pips:</b> {closed.pips:+g}\n"
+            f"• <b>Net PnL:</b> ${closed.net_profit:+,.2f}",
+            parse_mode="HTML",
+        )
+        return
 
     pending_trades = context.user_data.get("pending_trades")
     screenshot_path = context.user_data.get("current_screenshot")
@@ -205,6 +255,34 @@ def _manual_entry_template() -> str:
         "• <b>Ticket:</b> optional\n"
         "• <b>Date/Time:</b> YYYY-MM-DD HH:MM:SS (optional)"
     )
+
+
+async def _show_close_confirmation(message, trade, close_data, context: ContextTypes.DEFAULT_TYPE):
+    close_price = float(close_data["close_price"])
+    net_profit = float(close_data["net_profit"])
+    pips = calculate_pips(trade.symbol, trade.trade_type, trade.open_price, close_price)
+    context.user_data.pop("pending_close_data", None)
+    context.user_data["pending_close_trade"] = {
+        "trade_id": trade.id,
+        "close_price": close_price,
+        "net_profit": net_profit,
+    }
+    text = (
+        "🔒 <b>Confirm closing this open trade</b>\n\n"
+        f"• <b>Symbol:</b> <code>{html.escape(trade.symbol)}</code> {trade.trade_type}\n"
+        f"• <b>Volume:</b> {trade.volume:g} lots\n"
+        f"• <b>Entry:</b> {trade.open_price:g}\n"
+        f"• <b>Close:</b> {close_price:g}\n"
+        f"• <b>Calculated pips:</b> {pips:+g}\n"
+        f"• <b>Realized net PnL:</b> ${net_profit:+,.2f}\n"
+        f"• <b>Ticket:</b> <code>{html.escape(str(trade.ticket or trade.id))}</code>\n\n"
+        "Confirm to update the existing trade."
+    )
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Confirm Close", callback_data="confirm_close_trade"),
+        InlineKeyboardButton("Cancel", callback_data="cancel_close_trade"),
+    ]])
+    await message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def _reply_manual_entry_error(message, error: str):

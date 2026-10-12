@@ -14,6 +14,7 @@ VOICE_TRADE_PROMPT = """
 Listen to this voice note and extract the single trade the user dictated.
 Return only a JSON object with these fields:
 {
+  "action": "NEW_TRADE or CLOSE_EXISTING",
   "symbol": "normalized trading symbol, e.g. EURUSD",
   "trade_type": "BUY or SELL",
   "volume": number or null,
@@ -28,6 +29,12 @@ Return only a JSON object with these fields:
 Do not guess or infer values that were not spoken. Map 'sold' to SELL and 'bought' to BUY.
 If a field is not spoken, use null. Treat a price described as entry, opened, or sold/bought at
 as open_price. Treat 'stop' or 'stop loss' as sl, and 'take profit' or 'TP' as tp.
+Set action to CLOSE_EXISTING only when the speaker clearly asks to close/exit a trade already
+logged in the diary (for example, 'close my EURUSD trade'). For a close request, symbol and
+close_price are required; put the explicitly stated realized net profit or loss in profit, and
+include ticket when spoken. If the user is describing a completed trade to log for the first time,
+use NEW_TRADE. A close request may omit direction, lot size, and entry price because those belong
+to the existing trade.
 Only use close_price and profit when the speaker explicitly gives an exit/closing price and
 realized profit or loss. Do not return markdown or transcript commentary.
 """
@@ -78,6 +85,35 @@ def parse_voice_trade(audio_path: str, mime_type: str, api_key: str) -> Dict[str
 
 def _normalize_trade(raw: Dict[str, Any]) -> Dict[str, Any]:
     symbol = str(raw.get("symbol") or "").upper().replace("/", "").replace(" ", "")
+    action = str(raw.get("action") or "NEW_TRADE").upper().strip()
+    if action in ("CLOSE", "CLOSE_TRADE", "EXIT", "CLOSE_EXISTING"):
+        if not re.fullmatch(r"[A-Z0-9._-]{3,20}", symbol):
+            raise ValueError("I couldn't identify which symbol to close. Please say it, such as EUR/USD.")
+
+        def close_number(key: str) -> Optional[float]:
+            value = raw.get(key)
+            if value is None or value == "":
+                return None
+            try:
+                return float(str(value).replace(",", ""))
+            except (ValueError, TypeError):
+                return None
+
+        close_price = close_number("close_price")
+        profit = close_number("profit")
+        if close_price is None or close_price <= 0:
+            raise ValueError("Please say the closing price, for example: close EURUSD at 1.0800.")
+        if profit is None:
+            raise ValueError("Please include the realized net profit or loss, for example: net profit 25 dollars.")
+        return {
+            "action": "CLOSE_EXISTING",
+            "symbol": symbol,
+            "ticket": str(raw["ticket"]) if raw.get("ticket") is not None else None,
+            "close_price": close_price,
+            "profit": profit,
+            "net_profit": profit,
+        }
+
     trade_type = str(raw.get("trade_type") or "").upper().strip()
     if not re.fullmatch(r"[A-Z0-9._-]{3,20}", symbol):
         raise ValueError("I couldn't identify the symbol. Please say a symbol such as EUR/USD.")
@@ -102,6 +138,7 @@ def _normalize_trade(raw: Dict[str, Any]) -> Dict[str, Any]:
     close_price, profit = number("close_price"), number("profit")
     status = "CLOSED" if close_price is not None and profit is not None else "OPEN"
     return {
+        "action": "NEW_TRADE",
         "symbol": symbol,
         "trade_type": trade_type,
         "volume": volume,

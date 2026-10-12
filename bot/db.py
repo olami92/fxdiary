@@ -228,6 +228,59 @@ async def get_user_trades(telegram_id: int, limit: int = 100, offset: int = 0) -
         )
         return list(result.scalars().all())
 
+async def get_open_user_trades(
+    telegram_id: int,
+    symbol: Optional[str] = None,
+    ticket: Optional[str] = None,
+    trade_id: Optional[int] = None,
+) -> List[Trade]:
+    """Find open trades belonging to a user, optionally matching symbol/ticket."""
+    normalized_symbol = re.sub(r"[^A-Z0-9]", "", symbol.upper()) if symbol else None
+    normalized_ticket = ticket.lstrip("#").strip().casefold() if ticket else None
+    async with AsyncSessionLocal() as session:
+        query = select(Trade).where(Trade.user_id == telegram_id, Trade.status == "OPEN")
+        if trade_id is not None:
+            query = query.where(Trade.id == trade_id)
+        result = await session.execute(query.order_by(Trade.created_at.desc(), Trade.id.desc()))
+        trades = list(result.scalars().all())
+        if normalized_symbol:
+            trades = [
+                trade for trade in trades
+                if re.sub(r"[^A-Z0-9]", "", trade.symbol.upper()) == normalized_symbol
+            ]
+        if normalized_ticket:
+            trades = [
+                trade for trade in trades
+                if (trade.ticket or "").lstrip("#").strip().casefold() == normalized_ticket
+            ]
+        return trades
+
+async def close_user_trade(
+    telegram_id: int, trade_id: int, close_price: float, net_profit: float
+) -> Optional[Trade]:
+    """Close one open trade only if it belongs to the requesting Telegram user."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Trade).where(
+                Trade.id == trade_id,
+                Trade.user_id == telegram_id,
+                Trade.status == "OPEN",
+            )
+        )
+        trade = result.scalars().first()
+        if not trade:
+            return None
+
+        trade.close_price = float(close_price)
+        trade.profit = float(net_profit)
+        trade.net_profit = float(net_profit)
+        trade.pips = calculate_pips(trade.symbol, trade.trade_type, trade.open_price, trade.close_price)
+        trade.close_time = datetime.datetime.utcnow()
+        trade.status = "CLOSED"
+        await session.commit()
+        await session.refresh(trade)
+        return trade
+
 async def count_user_trades(telegram_id: int) -> int:
     """Return the total number of trades belonging to one user."""
     async with AsyncSessionLocal() as session:
