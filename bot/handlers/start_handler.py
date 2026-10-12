@@ -51,12 +51,25 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /help command."""
     help_text = (
         "📖 <b>FXDiary Bot User Guide</b>\n\n"
-        "<b>1. Uploading Screenshots:</b>\n"
-        "• Send any MT5 mobile or desktop trade screenshot directly as an image.\n"
-        "• The bot will extract trade fields and ask for confirmation.\n\n"
-        "<b>2. Querying & Reports:</b>\n"
-        "• Use <code>/stats</code> to view win rate, profit factor, max drawdown, and equity curve.\n"
-        "• Use <code>/export</code> to generate a PDF report or Excel spreadsheet.\n\n"
+        "<b>Log a trade with a voice note:</b>\n"
+        "• Tap the voice-record button, dictate your trade details, then send the recording. No command is needed.\n"
+        "• Include the symbol, BUY/SELL direction, lot size, and entry price. You can also say the stop loss and take profit.\n"
+        "• For a closed trade, include its closing price and realized profit/loss.\n"
+        "• Check the parsed details and tap <b>Save Trade</b> to add it to your diary, or <b>Skip Trade</b> to discard it.\n"
+        "• Trades without a closing price and realized PnL are saved as <b>Open</b> positions.\n\n"
+        "<b>Manual entry:</b>\n"
+        "• Tap <b>✏️ Add Trade</b> in the bot menu, or choose <b>Manual Entry</b> if screenshot reading fails.\n"
+        "• Fill in the trade template and reply to it. Pips are calculated automatically.\n"
+        "• You can also use <code>/manual_trade SYMBOL TYPE LOTS OPEN CLOSE NET_PNL</code>.\n"
+        "  Example: <code>/manual_trade EURUSD SELL 0.50 1.0850 1.0800 250.00</code>\n\n"
+        "<b>Log from an MT5 screenshot:</b>\n"
+        "• Send a screenshot of your MT5 trade history. Review each extracted trade and confirm which ones to save.\n\n"
+        "<b>Stats and reports:</b>\n"
+        "• <code>/stats</code> — view performance statistics and your equity curve.\n"
+        "• <code>/trades</code> — view recent trades.\n"
+        "• <code>/export</code> — generate a PDF or Excel report.\n"
+        "• <code>/help</code> — show this guide.\n\n"
         "Need help? Contact support or check documentation."
     )
-    await update.message.reply_html(help_text)
+    if update.message:
+        await update.message.reply_html(help_text)
