@@ -28,6 +28,7 @@ class User(Base):
     google_sheet_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     sheet_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="USD")
+    opening_capital: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     timezone: Mapped[str] = mapped_column(String(50), default="UTC")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
     last_active: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -85,12 +86,19 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_trade_status_column)
+        await conn.run_sync(_ensure_user_opening_capital_column)
 
 def _ensure_trade_status_column(connection):
     """Add trade status to databases created before open voice entries existed."""
     columns = {column["name"] for column in inspect(connection).get_columns("trades")}
     if "status" not in columns:
         connection.execute(text("ALTER TABLE trades ADD COLUMN status VARCHAR(12) NOT NULL DEFAULT 'CLOSED'"))
+
+def _ensure_user_opening_capital_column(connection):
+    """Add per-user starting capital for existing installations."""
+    columns = {column["name"] for column in inspect(connection).get_columns("users")}
+    if "opening_capital" not in columns:
+        connection.execute(text("ALTER TABLE users ADD COLUMN opening_capital FLOAT NOT NULL DEFAULT 0"))
 
 async def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None) -> User:
     """Retrieve existing user or create a new user entry."""
@@ -288,6 +296,18 @@ async def count_user_trades(telegram_id: int) -> int:
             select(func.count(Trade.id)).where(Trade.user_id == telegram_id)
         )
         return int(result.scalar_one())
+
+async def set_user_opening_capital(telegram_id: int, amount: float) -> Optional[User]:
+    """Save a user's starting account capital."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalars().first()
+        if user is None:
+            return None
+        user.opening_capital = float(amount)
+        await session.commit()
+        await session.refresh(user)
+        return user
 
 async def get_most_traded_currencies() -> Dict[int, set[str]]:
     """Get the most frequently traded currency exposure for each Telegram user."""

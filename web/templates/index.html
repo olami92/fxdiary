@@ -3,30 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FXDiary - MT5 Trading Journal</title>
-  
-  <!-- Google Fonts & Chart.js -->
+  <meta name="theme-color" content="#f3f4f1">
+  <title>MyFXkeeper — Trading overview</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://telegram.org/js/telegram-web-app.js?64"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-  <main id="signin-screen" class="container signin-screen">
-    <div class="card signin-card">
-      <div class="brand-icon">📈</div>
-      <h1>Welcome to FXDiary</h1>
+  <main id="signin-screen" class="signin-screen">
+    <div class="signin-card">
+      <div class="brand-mark">M<span>FX</span></div>
+      <p class="eyebrow">YOUR TRADING JOURNAL</p>
+      <h1>Welcome to MyFXkeeper</h1>
       <p>Sign in with Telegram to open your private trading dashboard.</p>
       {% if telegram_bot_username %}
-      <script async src="https://telegram.org/js/telegram-widget.js?22"
-        data-telegram-login="{{ telegram_bot_username }}"
-        data-size="large"
-        data-userpic="false"
-        data-onauth="onTelegramAuth(user)"
-        data-request-access="write"></script>
+      <script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="{{ telegram_bot_username }}" data-size="large" data-userpic="false" data-onauth="onTelegramAuth(user)" data-request-access="write"></script>
       {% else %}
       <p class="signin-error">Telegram sign-in is not configured. Set TELEGRAM_BOT_USERNAME on the server.</p>
       {% endif %}
@@ -34,169 +28,58 @@
     </div>
   </main>
 
-  <div class="container" id="dashboard-app" hidden>
-    <!-- Header -->
-    <header>
-      <div class="brand">
-        <div class="brand-icon">📈</div>
-        <div>
-          <h1>FXDiary</h1>
-          <p style="font-size:12px; color:var(--text-secondary);">Your private MT5 trading journal</p>
-        </div>
+  <div id="dashboard-app" class="app-shell" hidden>
+    <aside class="sidebar">
+      <a class="sidebar-brand" href="#top" aria-label="MyFXkeeper home"><span class="brand-mark small">M<span>FX</span></span><span>MyFXkeeper</span></a>
+      <p class="sidebar-label">WORKSPACE</p>
+      <a class="nav-link active" href="#overview"><span class="nav-icon">◫</span> Overview</a>
+      <a class="nav-link" href="#performance"><span class="nav-icon">⌁</span> Performance</a>
+      <a class="nav-link" href="#trade-history"><span class="nav-icon">▤</span> Trade history</a>
+      <div class="sidebar-bottom">
+        <div class="sidebar-user"><div class="user-avatar" id="user-avatar">T</div><div><strong id="sidebar-name">Trader</strong><span>Personal account</span></div></div>
+        <button id="logout-button" class="nav-link logout-button"><span class="nav-icon">↪</span> Sign out</button>
       </div>
+    </aside>
 
-      <div class="header-actions">
-        <span id="account-name" class="badge" style="align-self: center;"></span>
-        <button id="logout-button" class="btn btn-secondary">Sign out</button>
-        <a href="/api/export/pdf" class="btn btn-secondary">📄 Export PDF</a>
-        <a href="/api/export/excel" class="btn btn-primary">📊 Export Excel</a>
-      </div>
-    </header>
+    <main class="main-content" id="top">
+      <header class="topbar">
+        <div><p class="eyebrow" id="today-label">YOUR ACCOUNT</p><div class="greeting">Good day, <span id="greeting-name">Trader</span> <span class="wave">✦</span></div></div>
+        <div class="top-actions">
+          <span class="account-pill"><span class="online-dot"></span> Personal dashboard</span>
+          <a href="/api/export/excel" class="reports-button"><span class="download-icon">↓</span><span>Reports</span></a>
+        </div>
+      </header>
 
-    <!-- Key Performance Stat Cards -->
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="stat-header">
-          <span class="stat-title">Net Profit / Loss</span>
-          <div class="stat-icon">💰</div>
-        </div>
-        <div id="net-pnl" class="stat-value">$0.00</div>
-        <div class="stat-subtext">Lifetime Net Return</div>
-      </div>
+      <section id="overview" class="metric-grid" aria-label="Account summary">
+        <article class="metric-card primary-metric"><div class="metric-top"><span>Net profit</span><span class="metric-icon mint">↗</span></div><strong id="net-pnl" class="metric-value">$0.00</strong><span class="metric-caption">Lifetime realized P&amp;L</span><div class="metric-sparkline" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></article>
+        <article class="metric-card"><div class="metric-top"><span>Opening capital</span><button id="edit-capital" class="edit-capital" type="button" aria-label="Set opening capital">Edit</button></div><strong id="opening-capital" class="metric-value">$0.00</strong><span class="metric-caption">Starting account amount</span></article>
+        <article class="metric-card"><div class="metric-top"><span>Current balance</span><span class="metric-icon blue">◉</span></div><strong id="account-balance" class="metric-value">$0.00</strong><span class="metric-caption">Opening capital + net P&amp;L</span></article>
+        <article class="metric-card"><div class="metric-top"><span>Win rate</span><span class="metric-icon rose">◌</span></div><strong id="win-rate" class="metric-value">0.0%</strong><span class="metric-caption">Profitable trades</span></article>
+        <article class="metric-card"><div class="metric-top"><span>Total trades</span><span class="metric-icon sand">▤</span></div><strong id="total-trades" class="metric-value">0</strong><span class="metric-caption">Journaled executions</span></article>
+      </section>
 
-      <div class="stat-card">
-        <div class="stat-header">
-          <span class="stat-title">Win Rate</span>
-          <div class="stat-icon">🎯</div>
-        </div>
-        <div id="win-rate" class="stat-value" style="color:var(--accent-blue);">0.0%</div>
-        <div class="stat-subtext">Profitable Trades Ratio</div>
-      </div>
+      <section id="performance" class="analytics-grid">
+        <article class="panel performance-panel">
+          <div class="panel-heading"><div><p class="eyebrow">PERFORMANCE</p><h2>Profit overview</h2></div><div class="period-switch" role="group" aria-label="Chart period"><button class="period-button active" data-period="WTD">WTD</button><button class="period-button" data-period="MTD">MTD</button><button class="period-button" data-period="YTD">YTD</button></div></div>
+          <div class="chart-summary"><strong id="period-pnl">$0.00</strong><span id="period-caption">Week to date</span></div>
+          <div class="performance-chart-wrap"><canvas id="equityChart" aria-label="Net profit performance chart"></canvas></div>
+        </article>
+        <article class="panel winloss-panel">
+          <div class="panel-heading"><div><p class="eyebrow">TRADE QUALITY</p><h2>Win / loss</h2></div><span class="soft-icon">◉</span></div>
+          <div class="donut-wrap"><canvas id="winLossChart" aria-label="Win loss ratio chart"></canvas><div class="donut-center"><strong id="donut-winrate">0%</strong><span>win rate</span></div></div>
+          <div class="legend-list"><div><span class="legend-label"><i class="legend-dot green"></i>Wins</span><strong id="wins-count">0</strong></div><div><span class="legend-label"><i class="legend-dot red"></i>Losses</span><strong id="losses-count">0</strong></div><div><span class="legend-label"><i class="legend-dot gray"></i>Break even</span><strong id="breakeven-count">0</strong></div></div>
+          <div class="quality-footer"><span>Profit factor</span><strong id="profit-factor">0.00</strong><span>Best pair</span><strong id="best-symbol">—</strong></div>
+        </article>
+      </section>
 
-      <div class="stat-card">
-        <div class="stat-header">
-          <span class="stat-title">Profit Factor</span>
-          <div class="stat-icon">⚡</div>
-        </div>
-        <div id="profit-factor" class="stat-value" style="color:var(--accent-purple);">0.00</div>
-        <div class="stat-subtext">Gross Profit / Gross Loss</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-header">
-          <span class="stat-title">Total Trades</span>
-          <div class="stat-icon">🔢</div>
-        </div>
-        <div id="total-trades" class="stat-value">0</div>
-        <div class="stat-subtext">Logged Execution Count</div>
-      </div>
-    </div>
-
-    <!-- Charts Row -->
-    <div class="charts-grid">
-      <div class="card">
-        <div class="card-title">
-          <span>📈 Cumulative Equity Curve ($)</span>
-          <span style="font-size:12px; color:var(--text-secondary);">Real-time Growth</span>
-        </div>
-        <div class="chart-container">
-          <canvas id="equityChart"></canvas>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">
-          <span>🎯 Win / Loss Ratio</span>
-        </div>
-        <div class="chart-container">
-          <canvas id="winLossChart"></canvas>
-        </div>
-        
-        <div style="margin-top:20px; border-top:var(--glass-border); padding-top:14px; font-size:13px;">
-          <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-            <span style="color:var(--text-secondary);">Avg Win:</span>
-            <span id="avg-win" style="color:var(--accent-green); font-weight:700;">+$0.00</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-            <span style="color:var(--text-secondary);">Avg Loss:</span>
-            <span id="avg-loss" style="color:var(--accent-red); font-weight:700;">-$0.00</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
-            <span style="color:var(--text-secondary);">Max Drawdown:</span>
-            <span id="max-dd" style="color:var(--accent-red); font-weight:700;">-$0.00</span>
-          </div>
-          <div style="display:flex; justify-content:space-between;">
-            <span style="color:var(--text-secondary);">Best Pair:</span>
-            <span id="best-symbol" style="font-weight:700;">N/A</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Upload Zone & Quick Manual Trade -->
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; margin-bottom:32px;">
-      <div class="card">
-        <div class="card-title">📸 Upload MT5 Screenshot (AI OCR)</div>
-        <div id="drop-zone" class="upload-zone">
-          <div class="upload-icon">📷</div>
-          <p style="font-weight:600;">Drag & drop your MT5 history screenshot here</p>
-          <p style="font-size:12px; color:var(--text-secondary); margin-top:4px;">or click to browse files</p>
-          <input type="file" id="file-input" accept="image/*" style="display:none;">
-          <div id="upload-status" style="margin-top:12px; font-size:13px; color:var(--accent-blue);"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">🤖 Add Trades with Telegram</div>
-        <p style="font-size:14px; color:var(--text-secondary); margin-bottom:12px;">
-          Send your MT5 trade screenshots to the Telegram bot. Your dashboard is linked to your Telegram account.
-        </p>
-        <div style="background:rgba(15,23,42,0.6); padding:14px; border-radius:10px; font-family:monospace; font-size:13px; color:#A7F3D0;">
-          1. Sign in with the same Telegram account<br>
-          2. Send an MT5 screenshot to the bot<br>
-          3. Confirm the extracted trade<br>
-          4. It appears here in your dashboard
-        </div>
-      </div>
-    </div>
-
-    <!-- Trade History Table -->
-    <div class="card">
-      <div class="card-title">
-        <span>📋 Trade Log History</span>
-        <button class="btn btn-secondary" onclick="loadDashboardData()" style="font-size:12px; padding:6px 12px;">🔄 Refresh</button>
-      </div>
-
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>Ticket</th>
-              <th>Status</th>
-              <th>Symbol</th>
-              <th>Type</th>
-              <th>Lots</th>
-              <th>Open → Close Price</th>
-              <th>Pips</th>
-              <th>Net PnL</th>
-              <th>Date / Time</th>
-            </tr>
-          </thead>
-          <tbody id="trades-tbody">
-            <!-- Dynamic rows -->
-          </tbody>
-        </table>
-      </div>
-      <div class="trade-pagination" id="trade-pagination" hidden>
-        <span id="trade-page-info" aria-live="polite"></span>
-        <div class="trade-pagination-actions">
-          <button class="btn btn-secondary" id="trade-prev-page" type="button">← Previous</button>
-          <button class="btn btn-secondary" id="trade-next-page" type="button">Next →</button>
-        </div>
-      </div>
-    </div>
+      <section id="trade-history" class="panel history-panel">
+        <div class="panel-heading history-heading"><div><p class="eyebrow">YOUR ACTIVITY</p><h2>Trade history</h2></div><button class="refresh-button" onclick="loadDashboardData()" type="button" aria-label="Refresh trade history">↻ <span>Refresh</span></button></div>
+        <div class="table-container"><table><thead><tr><th>Trade</th><th>Status</th><th>Direction</th><th>Volume</th><th>Entry / exit</th><th>Pips</th><th>Net P&amp;L</th><th>Date</th></tr></thead><tbody id="trades-tbody"></tbody></table></div>
+        <div class="trade-pagination" id="trade-pagination" hidden><span id="trade-page-info" aria-live="polite"></span><div class="trade-pagination-actions"><button class="page-button" id="trade-prev-page" type="button">← Previous</button><button class="page-button" id="trade-next-page" type="button">Next →</button></div></div>
+      </section>
+      <footer class="footer-note">MyFXkeeper <span>·</span> Your trades, clearly kept.</footer>
+    </main>
   </div>
-
   <script src="/static/js/app.js"></script>
 </body>
 </html>

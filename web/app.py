@@ -6,6 +6,7 @@ import datetime
 import hashlib
 import hmac
 import json
+import math
 import secrets
 import time
 from urllib.parse import parse_qsl
@@ -19,14 +20,14 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from bot.config import UPLOADS_DIR, GEMINI_API_KEY, HOST, PORT
-from bot.db import init_db, get_or_create_user, get_user_trades, count_user_trades, add_trade, delete_user_trade, AsyncSessionLocal
+from bot.db import init_db, get_or_create_user, get_user_trades, count_user_trades, add_trade, delete_user_trade, set_user_opening_capital, AsyncSessionLocal
 from bot.analytics import calculate_stats, generate_equity_chart
 from bot.ocr_engine import parse_mt5_screenshot
 from bot.export_engine import generate_pdf_report, generate_excel_report
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-app = FastAPI(title="FXDiary Dashboard & Web App")
+app = FastAPI(title="MyFXkeeper Dashboard & Web App")
 SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("TELEGRAM_BOT_TOKEN") or secrets.token_urlsafe(32)
 TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", https_only=os.getenv("RENDER", "") != "")
@@ -41,7 +42,7 @@ async def _run_telegram_bot_background(token: str):
     """Run Telegram bot polling in a non-blocking background task."""
     from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
     from bot.handlers.start_handler import start_command, help_command
-    from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler
+    from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler, open_trade_command
     from bot.handlers.voice_handler import voice_message_handler
     from bot.handlers.stats_handler import stats_command
     from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
@@ -56,6 +57,7 @@ async def _run_telegram_bot_background(token: str):
         bot_app.add_handler(CommandHandler("help", help_command))
         bot_app.add_handler(CommandHandler("stats", stats_command))
         bot_app.add_handler(CommandHandler("trades", trades_command))
+        bot_app.add_handler(CommandHandler("open_trade", open_trade_command))
         bot_app.add_handler(CommandHandler("manual_trade", manual_trade_command))
         bot_app.add_handler(CommandHandler("export", export_command))
         bot_app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
@@ -202,18 +204,39 @@ async def telegram_logout(request: Request):
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Render."""
-    return {"status": "ok", "app": "FXDiary"}
+    return {"status": "ok", "app": "MyFXkeeper"}
 
 @app.get("/api/stats")
 async def get_stats(request: Request):
     """Fetch trading statistics JSON."""
     user = await _require_dashboard_user(request)
-    trades = await get_user_trades(user.telegram_id, limit=500)
+    trade_count = await count_user_trades(user.telegram_id)
+    trades = await get_user_trades(user.telegram_id, limit=max(trade_count, 1))
     stats = calculate_stats(trades)
     return JSONResponse(content={
         "user": {"name": user.first_name or "Trader"},
-        "stats": stats
+        "stats": stats,
+        "opening_capital": user.opening_capital or 0.0,
+        "chart_trades": [
+            {"net_profit": trade.net_profit or 0.0,
+             "close_time": f"{trade.close_time.isoformat()}Z" if trade.close_time else None,
+             "status": trade.status}
+            for trade in trades
+        ],
     })
+
+class OpeningCapitalRequest(BaseModel):
+    amount: float
+
+@app.put("/api/account/opening-capital")
+async def update_opening_capital(payload: OpeningCapitalRequest, request: Request):
+    user = await _require_dashboard_user(request)
+    if not math.isfinite(payload.amount) or payload.amount < 0:
+        raise HTTPException(status_code=400, detail="Opening capital must be a valid non-negative amount.")
+    updated_user = await set_user_opening_capital(user.telegram_id, payload.amount)
+    if updated_user is None:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    return {"opening_capital": updated_user.opening_capital}
 
 @app.get("/api/trades")
 async def list_trades(request: Request, page: int = Query(1, ge=1)):

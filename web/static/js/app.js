@@ -1,11 +1,14 @@
 let equityChart = null;
 let winLossChart = null;
 let currentTradesPage = 1;
-const tradesPageSize = 20;
+let selectedPeriod = "WTD";
+let chartTrades = [];
+let dashboardStats = {};
 
 document.addEventListener("DOMContentLoaded", () => {
   initCharts();
   setupEventListeners();
+  setTodayLabel();
   initializeDashboard();
 });
 
@@ -16,22 +19,19 @@ async function initializeDashboard() {
       telegramApp.ready();
       telegramApp.expand();
       const loginResponse = await fetch("/api/auth/telegram-miniapp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ init_data: telegramApp.initData })
       });
       const user = await loginResponse.json();
       if (!loginResponse.ok) throw new Error(user.detail || "Telegram Mini App sign-in failed.");
       showDashboard(user);
-      loadDashboardData();
+      await loadDashboardData();
       return;
     }
-
     const response = await fetch("/api/auth/me");
     if (!response.ok) return showSignIn();
-    const user = await response.json();
-    showDashboard(user);
-    loadDashboardData();
+    showDashboard(await response.json());
+    await loadDashboardData();
   } catch (err) {
     showSignIn("Unable to connect. Please refresh and try again.");
   }
@@ -42,280 +42,153 @@ window.onTelegramAuth = async function (telegramUser) {
   if (errorEl) errorEl.hidden = true;
   try {
     const response = await fetch("/api/auth/telegram", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(telegramUser)
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(telegramUser)
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.detail || "Telegram sign-in failed.");
     showDashboard(result);
-    loadDashboardData();
-  } catch (err) {
-    showSignIn(err.message);
-  }
+    await loadDashboardData();
+  } catch (err) { showSignIn(err.message); }
 };
 
 function showSignIn(message = "") {
   document.getElementById("signin-screen").hidden = false;
   document.getElementById("dashboard-app").hidden = true;
   const errorEl = document.getElementById("signin-error");
-  if (errorEl) {
-    errorEl.textContent = message;
-    errorEl.hidden = !message;
-  }
+  if (errorEl) { errorEl.textContent = message; errorEl.hidden = !message; }
 }
 
 function showDashboard(user) {
   document.getElementById("signin-screen").hidden = true;
   document.getElementById("dashboard-app").hidden = false;
-  const name = user.first_name || user.username || "Telegram user";
-  document.getElementById("account-name").textContent = `👤 ${name}`;
+  const name = user.first_name || user.username || "Trader";
+  document.getElementById("greeting-name").textContent = name;
+  document.getElementById("sidebar-name").textContent = name;
+  document.getElementById("user-avatar").textContent = name.trim().charAt(0).toUpperCase() || "T";
+}
+
+function setTodayLabel() {
+  document.getElementById("today-label").textContent = new Intl.DateTimeFormat(undefined, { weekday: "long", month: "long", day: "numeric" }).format(new Date()).toUpperCase();
 }
 
 async function loadDashboardData(page = currentTradesPage) {
   try {
-    const [statsRes, tradesRes] = await Promise.all([
-      fetch("/api/stats"),
-      fetch(`/api/trades?page=${page}`)
-    ]);
-
+    const [statsRes, tradesRes] = await Promise.all([fetch("/api/stats"), fetch(`/api/trades?page=${page}`)]);
     if (statsRes.status === 401 || tradesRes.status === 401) return showSignIn();
-
     const statsData = await statsRes.json();
     const tradesData = await tradesRes.json();
-
-    renderStats(statsData.stats);
+    dashboardStats = statsData.stats || {};
+    chartTrades = statsData.chart_trades || [];
+    renderStats(dashboardStats, statsData.opening_capital || 0);
     currentTradesPage = tradesData.pagination.page;
     renderTrades(tradesData.trades, tradesData.pagination);
-    if (currentTradesPage === 1) updateCharts(tradesData.trades, statsData.stats);
-
-  } catch (err) {
-    console.error("Failed to load dashboard data:", err);
-  }
+    updateCharts(chartTrades, dashboardStats);
+  } catch (err) { console.error("Failed to load dashboard data:", err); }
 }
 
-function renderStats(stats) {
-  const pnlEl = document.getElementById("net-pnl");
-  const winRateEl = document.getElementById("win-rate");
-  const profitFactorEl = document.getElementById("profit-factor");
-  const totalTradesEl = document.getElementById("total-trades");
+function renderStats(stats, openingCapital) {
+  const pnl = Number(stats.total_net_pnl || 0);
+  const balance = Number(openingCapital || 0) + pnl;
+  setMoney("net-pnl", pnl, true);
+  setMoney("opening-capital", Number(openingCapital || 0));
+  setMoney("account-balance", balance);
+  document.getElementById("win-rate").textContent = `${Number(stats.win_rate || 0).toFixed(1)}%`;
+  document.getElementById("total-trades").textContent = Number(stats.total_trades || 0).toLocaleString();
+  document.getElementById("profit-factor").textContent = Number(stats.profit_factor || 0).toFixed(2);
+  document.getElementById("donut-winrate").textContent = `${Number(stats.win_rate || 0).toFixed(0)}%`;
+  document.getElementById("wins-count").textContent = Number(stats.wins || 0);
+  document.getElementById("losses-count").textContent = Number(stats.losses || 0);
+  document.getElementById("breakeven-count").textContent = Number(stats.breakeven || 0);
+  document.getElementById("best-symbol").textContent = stats.best_symbol || "—";
+}
 
-  if (pnlEl) {
-    const val = stats.total_net_pnl || 0;
-    pnlEl.textContent = `${val >= 0 ? '+' : ''}$${Math.abs(val).toLocaleString(undefined, {minimumFractionDigits: 2})}`;
-    pnlEl.className = `stat-value ${val >= 0 ? 'win' : 'loss'}`;
-  }
-  if (winRateEl) winRateEl.textContent = `${stats.win_rate}%`;
-  if (profitFactorEl) profitFactorEl.textContent = stats.profit_factor;
-  if (totalTradesEl) totalTradesEl.textContent = stats.total_trades;
-
-  document.getElementById("avg-win").textContent = `+$${(stats.avg_win || 0).toFixed(2)}`;
-  document.getElementById("avg-loss").textContent = `-$${(stats.avg_loss || 0).toFixed(2)}`;
-  document.getElementById("max-dd").textContent = `-$${(stats.max_drawdown || 0).toFixed(2)}`;
-  document.getElementById("best-symbol").textContent = stats.best_symbol || "N/A";
+function setMoney(id, value, signed = false) {
+  const node = document.getElementById(id);
+  node.textContent = `${signed && value > 0 ? "+" : value < 0 ? "−" : ""}$${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (signed) node.classList.toggle("negative", value < 0);
 }
 
 function renderTrades(trades, pagination) {
   const tbody = document.getElementById("trades-tbody");
-  if (!tbody) return;
-
-  if (!trades || trades.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:32px; color:var(--text-secondary);">No trades logged yet. Upload an MT5 screenshot or add a manual trade!</td></tr>`;
+  if (!trades?.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No trades in your journal yet. Your Telegram trade entries will appear here.</td></tr>';
   } else {
     tbody.innerHTML = trades.map((t) => {
-      const pnl = t.net_profit || 0;
-      const isOpen = t.status === "OPEN";
-      const pnlClass = pnl >= 0 ? "badge-win" : "badge-loss";
-      const typeClass = t.trade_type === "BUY" ? "badge-buy" : "badge-sell";
-
-      return `
-        <tr>
-          <td>#${t.ticket || t.id}</td>
-          <td><span class="badge ${isOpen ? "badge-open" : "badge-closed"}">${isOpen ? "OPEN" : "CLOSED"}</span></td>
-          <td><b>${t.symbol}</b></td>
-          <td><span class="badge ${typeClass}">${t.trade_type}</span></td>
-          <td>${t.volume.toFixed(2)}</td>
-          <td>${t.open_price} → ${isOpen ? "Open" : t.close_price}</td>
-          <td>${isOpen ? "—" : `${t.pips >= 0 ? '+' : ''}${t.pips} pips`}</td>
-          <td>${isOpen ? "—" : `<span class="badge ${pnlClass}">${pnl >= 0 ? '+' : ''}$${Math.abs(pnl).toFixed(2)}</span>`}</td>
-          <td>${isOpen ? "Open position" : t.close_time}</td>
-        </tr>
-      `;
+      const pnl = Number(t.net_profit || 0), isOpen = t.status === "OPEN";
+      const symbol = escapeHtml(t.symbol || "—"), type = escapeHtml(t.trade_type || "—");
+      const date = isOpen ? "Open position" : (t.close_time || "—");
+      return `<tr><td><span class="trade-symbol">${symbol}</span><span class="trade-ticket">#${escapeHtml(t.ticket || t.id)}</span></td><td><span class="badge ${isOpen ? "badge-open" : "badge-closed"}">${isOpen ? "OPEN" : "CLOSED"}</span></td><td><span class="badge ${type === "BUY" ? "badge-buy" : "badge-sell"}">${type}</span></td><td>${Number(t.volume || 0).toFixed(2)} lots</td><td>${escapeHtml(String(t.open_price ?? "—"))} <span class="muted-arrow">→</span> ${isOpen ? "Open" : escapeHtml(String(t.close_price ?? "—"))}</td><td>${isOpen ? "—" : `${Number(t.pips || 0) > 0 ? "+" : ""}${Number(t.pips || 0)} pips`}</td><td>${isOpen ? "—" : `<span class="${pnl >= 0 ? "pnl-positive" : "pnl-negative"}">${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}</span>`}</td><td>${escapeHtml(date)}</td></tr>`;
     }).join("");
   }
-
   const paginationEl = document.getElementById("trade-pagination");
   const infoEl = document.getElementById("trade-page-info");
-  const prevButton = document.getElementById("trade-prev-page");
-  const nextButton = document.getElementById("trade-next-page");
-  if (paginationEl && pagination) {
-    paginationEl.hidden = pagination.total_pages <= 1;
-    infoEl.textContent = pagination.total_trades
-      ? `Showing ${(pagination.page - 1) * pagination.page_size + 1}–${Math.min(pagination.page * pagination.page_size, pagination.total_trades)} of ${pagination.total_trades} trades · Page ${pagination.page} of ${pagination.total_pages}`
-      : "No trades";
-    prevButton.disabled = pagination.page <= 1;
-    nextButton.disabled = pagination.page >= pagination.total_pages;
-  }
+  const prev = document.getElementById("trade-prev-page"), next = document.getElementById("trade-next-page");
+  paginationEl.hidden = pagination.total_pages <= 1;
+  infoEl.textContent = pagination.total_trades ? `Showing ${(pagination.page - 1) * pagination.page_size + 1}–${Math.min(pagination.page * pagination.page_size, pagination.total_trades)} of ${pagination.total_trades} · Page ${pagination.page} of ${pagination.total_pages}` : "No trades";
+  prev.disabled = pagination.page <= 1;
+  next.disabled = pagination.page >= pagination.total_pages;
 }
 
+function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+
 function initCharts() {
-  const ctxEquity = document.getElementById("equityChart")?.getContext("2d");
-  const ctxWinLoss = document.getElementById("winLossChart")?.getContext("2d");
-
-  if (ctxEquity) {
-    equityChart = new Chart(ctxEquity, {
-      type: "line",
-      data: {
-        labels: [],
-        datasets: [{
-          label: "Cumulative PnL ($)",
-          data: [],
-          borderColor: "#10B981",
-          backgroundColor: "rgba(16, 185, 129, 0.1)",
-          borderWidth: 3,
-          fill: true,
-          tension: 0.3
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false } },
-        scales: {
-          x: { grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94A3B8" } },
-          y: { grid: { color: "rgba(255, 255, 255, 0.05)" }, ticks: { color: "#94A3B8" } }
-        }
-      }
-    });
+  const ctx = document.getElementById("equityChart")?.getContext("2d");
+  const donut = document.getElementById("winLossChart")?.getContext("2d");
+  if (ctx) {
+    const gradient = ctx.createLinearGradient(0, 0, 0, 260);
+    gradient.addColorStop(0, "rgba(34,162,73,.22)"); gradient.addColorStop(1, "rgba(34,162,73,0)");
+    equityChart = new Chart(ctx, { type: "line", data: { labels: [], datasets: [{ data: [], borderColor: "#22a249", backgroundColor: gradient, borderWidth: 2.5, fill: true, tension: .38, pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: "#22a249", pointHoverBorderColor: "#fff", pointHoverBorderWidth: 3 }] }, options: { responsive: true, maintainAspectRatio: false, interaction: { intersect: false, mode: "index" }, plugins: { legend: { display: false }, tooltip: { displayColors: false, backgroundColor: "#171a17", padding: 11, callbacks: { label: (item) => ` ${item.parsed.y >= 0 ? "+" : "−"}$${Math.abs(item.parsed.y).toFixed(2)}` } } }, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { color: "#989e96", maxTicksLimit: 7, font: { size: 9 } } }, y: { grid: { color: "#eff1ed", drawTicks: false }, border: { display: false, dash: [3, 4] }, ticks: { color: "#989e96", padding: 9, maxTicksLimit: 5, font: { size: 9 }, callback: (v) => `${v < 0 ? "−" : ""}$${Math.abs(v)}` } } } } });
   }
+  if (donut) winLossChart = new Chart(donut, { type: "doughnut", data: { labels: ["Wins", "Losses", "Break even"], datasets: [{ data: [0, 0, 0], backgroundColor: ["#22a249", "#9a3651", "#dce0d9"], borderWidth: 0, hoverOffset: 5, spacing: 4, borderRadius: 4 }] }, options: { cutout: "77%", responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { backgroundColor: "#171a17", padding: 10 } } } });
+}
 
-  if (ctxWinLoss) {
-    winLossChart = new Chart(ctxWinLoss, {
-      type: "doughnut",
-      data: {
-        labels: ["Wins", "Losses", "Break Even"],
-        datasets: [{
-          data: [0, 0, 0],
-          backgroundColor: ["#10B981", "#EF4444", "#64748B"],
-          borderWidth: 0
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { position: "bottom", labels: { color: "#F8FAFC", font: { size: 12 } } }
-        }
-      }
-    });
-  }
+function periodStart(period, now) {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  if (period === "WTD") { const daysSinceMonday = (start.getDay() + 6) % 7; start.setDate(start.getDate() - daysSinceMonday); }
+  if (period === "MTD") start.setDate(1);
+  if (period === "YTD") { start.setMonth(0, 1); }
+  return start;
 }
 
 function updateCharts(trades, stats) {
-  if (!trades) return;
-
-  const sorted = [...trades].reverse();
+  const now = new Date(), start = periodStart(selectedPeriod, now);
+  const filtered = trades.filter((trade) => {
+    if (trade.status === "OPEN" || !trade.close_time) return false;
+    const date = new Date(trade.close_time);
+    return !Number.isNaN(date.getTime()) && date >= start && date <= now;
+  }).sort((a, b) => new Date(a.close_time) - new Date(b.close_time));
   let cumulative = 0;
-  const labels = ["Start"];
-  const data = [0];
-
-  sorted.forEach((t, i) => {
-    cumulative += (t.net_profit || 0);
-    labels.push(`Trade ${i + 1}`);
-    data.push(cumulative);
-  });
-
-  if (equityChart) {
-    equityChart.data.labels = labels;
-    equityChart.data.datasets[0].data = data;
-    equityChart.data.datasets[0].borderColor = cumulative >= 0 ? "#10B981" : "#EF4444";
-    equityChart.data.datasets[0].backgroundColor = cumulative >= 0 ? "rgba(16, 185, 129, 0.1)" : "rgba(239, 68, 68, 0.1)";
-    equityChart.update();
-  }
-
-  if (winLossChart && stats) {
-    winLossChart.data.datasets[0].data = [stats.wins || 0, stats.losses || 0, stats.breakeven || 0];
-    winLossChart.update();
-  }
+  const labels = [formatChartDate(start)], values = [0];
+  filtered.forEach((trade) => { cumulative += Number(trade.net_profit || 0); labels.push(formatChartDate(new Date(trade.close_time))); values.push(Number(cumulative.toFixed(2))); });
+  if (!filtered.length) { labels.push("Today"); values.push(0); }
+  if (equityChart) { equityChart.data.labels = labels; equityChart.data.datasets[0].data = values; equityChart.update(); }
+  const periodNames = { WTD: "Week to date", MTD: "Month to date", YTD: "Year to date" };
+  const periodPnl = filtered.reduce((sum, trade) => sum + Number(trade.net_profit || 0), 0);
+  setMoney("period-pnl", periodPnl, true);
+  document.getElementById("period-caption").textContent = periodNames[selectedPeriod];
+  if (winLossChart && stats) { winLossChart.data.datasets[0].data = [stats.wins || 0, stats.losses || 0, stats.breakeven || 0]; winLossChart.update(); }
 }
+
+function formatChartDate(date) { return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(date); }
 
 function setupEventListeners() {
-  document.getElementById("trade-prev-page")?.addEventListener("click", () => {
-    if (currentTradesPage > 1) loadDashboardData(currentTradesPage - 1);
+  document.getElementById("trade-prev-page")?.addEventListener("click", () => { if (currentTradesPage > 1) loadDashboardData(currentTradesPage - 1); });
+  document.getElementById("trade-next-page")?.addEventListener("click", () => loadDashboardData(currentTradesPage + 1));
+  document.getElementById("logout-button")?.addEventListener("click", async () => { await fetch("/api/auth/logout", { method: "POST" }); showSignIn(); });
+  document.querySelectorAll(".period-button").forEach((button) => button.addEventListener("click", () => {
+    document.querySelectorAll(".period-button").forEach((item) => item.classList.toggle("active", item === button));
+    selectedPeriod = button.dataset.period;
+    updateCharts(chartTrades, dashboardStats);
+  }));
+  document.getElementById("edit-capital")?.addEventListener("click", async () => {
+    const current = Number(document.getElementById("opening-capital").textContent.replace(/[^\d.-]/g, "")) || 0;
+    const answer = window.prompt("Enter your opening account capital (USD):", current.toFixed(2));
+    if (answer === null) return;
+    const amount = Number(answer.replace(/,/g, ""));
+    if (!Number.isFinite(amount) || amount < 0) { window.alert("Please enter a valid amount of zero or more."); return; }
+    const response = await fetch("/api/account/opening-capital", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount }) });
+    if (!response.ok) { window.alert("Could not save opening capital. Please try again."); return; }
+    await loadDashboardData();
   });
-  document.getElementById("trade-next-page")?.addEventListener("click", () => {
-    loadDashboardData(currentTradesPage + 1);
-  });
-
-  document.getElementById("logout-button")?.addEventListener("click", async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    showSignIn();
-  });
-
-  const dropZone = document.getElementById("drop-zone");
-  const fileInput = document.getElementById("file-input");
-
-  if (dropZone && fileInput) {
-    dropZone.addEventListener("click", () => fileInput.click());
-
-    fileInput.addEventListener("change", (e) => {
-      if (e.target.files.length > 0) handleFileUpload(e.target.files[0]);
-    });
-
-    dropZone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      dropZone.style.borderColor = "#3B82F6";
-    });
-
-    dropZone.addEventListener("dragleave", () => {
-      dropZone.style.borderColor = "var(--border-color)";
-    });
-
-    dropZone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dropZone.style.borderColor = "var(--border-color)";
-      if (e.dataTransfer.files.length > 0) handleFileUpload(e.dataTransfer.files[0]);
-    });
-  }
-}
-
-async function handleFileUpload(file) {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const statusEl = document.getElementById("upload-status");
-  if (statusEl) statusEl.innerHTML = "⏳ Analyzing screenshot with AI...";
-
-  try {
-    const res = await fetch("/api/upload-screenshot", {
-      method: "POST",
-      body: formData
-    });
-    const data = await res.json();
-
-    if (data.success && data.parsed_trades && data.parsed_trades.length > 0) {
-      const trade = data.parsed_trades[0];
-      // Save parsed trade
-      await fetch("/api/trades", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          symbol: trade.symbol,
-          trade_type: trade.trade_type,
-          volume: trade.volume,
-          open_price: trade.open_price,
-          close_price: trade.close_price,
-          profit: trade.profit
-        })
-      });
-
-      if (statusEl) statusEl.innerHTML = "✅ Trade extracted & saved!";
-      loadDashboardData();
-    } else {
-      if (statusEl) statusEl.innerHTML = "⚠️ Could not parse screenshot. Enter trade manually!";
-    }
-  } catch (err) {
-    console.error("Upload error:", err);
-    if (statusEl) statusEl.innerHTML = "❌ Upload failed.";
-  }
 }
