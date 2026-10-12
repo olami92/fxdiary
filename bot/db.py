@@ -5,9 +5,10 @@ if user_site and user_site not in sys.path:
     sys.path.insert(0, user_site)
 
 import datetime
+import re
 from typing import List, Optional, Dict, Any
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, ForeignKey, BigInteger, Text, Boolean, select, func
+    Column, Integer, String, Float, DateTime, ForeignKey, BigInteger, Text, Boolean, UniqueConstraint, select, func
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import inspect, text
@@ -60,6 +61,15 @@ class Trade(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
 
     user: Mapped["User"] = relationship("User", back_populates="trades")
+
+class EconomicAlert(Base):
+    __tablename__ = "economic_alerts"
+    __table_args__ = (UniqueConstraint("user_id", "event_key", name="uq_economic_alert_user_event"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id", ondelete="CASCADE"), nullable=False, index=True)
+    event_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    alerted_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
 engine_options = {"echo": False, "pool_pre_ping": True}
 if DATABASE_URL.startswith("postgresql+asyncpg://"):
@@ -225,6 +235,49 @@ async def count_user_trades(telegram_id: int) -> int:
             select(func.count(Trade.id)).where(Trade.user_id == telegram_id)
         )
         return int(result.scalar_one())
+
+async def get_most_traded_currencies() -> Dict[int, set[str]]:
+    """Get the most frequently traded currency exposure for each Telegram user."""
+    currency_codes = {
+        "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "CNY", "CNH",
+        "HKD", "SGD", "SEK", "NOK", "MXN", "ZAR", "TRY", "PLN", "THB", "HUF",
+    }
+    counts: Dict[int, Dict[str, int]] = {}
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Trade.user_id, Trade.symbol))
+        for user_id, symbol in result.all():
+            normalized = re.sub(r"[^A-Z]", "", str(symbol or "").upper())
+            currencies = set()
+            for start in range(max(0, len(normalized) - 5)):
+                first, second = normalized[start:start + 3], normalized[start + 3:start + 6]
+                if first in currency_codes:
+                    currencies.add(first)
+                if second in currency_codes:
+                    currencies.add(second)
+            user_counts = counts.setdefault(int(user_id), {})
+            for currency in currencies:
+                user_counts[currency] = user_counts.get(currency, 0) + 1
+
+    most_traded: Dict[int, set[str]] = {}
+    for user_id, user_counts in counts.items():
+        max_count = max(user_counts.values())
+        most_traded[user_id] = {currency for currency, count in user_counts.items() if count == max_count}
+    return most_traded
+
+async def has_economic_alert_been_sent(telegram_id: int, event_key: str) -> bool:
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(EconomicAlert.id).where(
+                EconomicAlert.user_id == telegram_id,
+                EconomicAlert.event_key == event_key,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+async def record_economic_alert(telegram_id: int, event_key: str) -> None:
+    async with AsyncSessionLocal() as session:
+        session.add(EconomicAlert(user_id=telegram_id, event_key=event_key))
+        await session.commit()
 
 async def delete_user_trade(telegram_id: int, trade_id: int) -> bool:
     """Delete a trade by ID for a user."""

@@ -46,6 +46,7 @@ async def _run_telegram_bot_background(token: str):
     from bot.handlers.stats_handler import stats_command
     from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
     from bot.handlers.export_handler import export_command, export_callback_handler
+    from bot.economic_calendar import start_economic_calendar_alerts
     from bot.main import inline_shortcut_router
 
     try:
@@ -68,6 +69,7 @@ async def _run_telegram_bot_background(token: str):
         await bot_app.initialize()
         await bot_app.start()
         await bot_app.updater.start_polling(drop_pending_updates=True)
+        start_economic_calendar_alerts(bot_app)
         logger.info("Telegram Bot active and polling!")
     except Exception as e:
         logger.warning(f"Telegram Bot polling warning: {e}. If another instance is running, only one can poll at a time.")

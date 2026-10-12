@@ -14,6 +14,7 @@ from bot.handlers.voice_handler import voice_message_handler
 from bot.handlers.stats_handler import stats_command
 from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
 from bot.handlers.export_handler import export_command, export_callback_handler
+from bot.economic_calendar import start_economic_calendar_alerts
 
 # Configure Logging
 logging.basicConfig(
@@ -21,6 +22,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+async def _post_init(application):
+    start_economic_calendar_alerts(application)
 
 async def inline_shortcut_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route quick navigation inline buttons from start menu."""
@@ -53,7 +57,7 @@ def main():
     logger.info("Database initialized successfully.")
 
     # Build Telegram Bot Application
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(_post_init).build()
 
     # Register Command Handlers
     app.add_handler(CommandHandler("start", start_command))
