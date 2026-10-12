@@ -10,6 +10,10 @@ import numpy as np
 
 def calculate_stats(trades: List[Any]) -> Dict[str, Any]:
     """Calculate comprehensive trading performance analytics."""
+    trades = [
+        t for t in trades
+        if (getattr(t, "status", None) or (t.get("status") if isinstance(t, dict) else None) or "CLOSED").upper() != "OPEN"
+    ]
     if not trades:
         return {
             "total_trades": 0,
