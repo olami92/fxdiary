@@ -9,7 +9,7 @@ from telegram.ext import (
 from bot.config import TELEGRAM_BOT_TOKEN
 from bot.db import init_db
 from bot.handlers.start_handler import start_command, help_command
-from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler
+from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler, open_trade_command
 from bot.handlers.voice_handler import voice_message_handler
 from bot.handlers.stats_handler import stats_command
 from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
@@ -64,6 +64,7 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("trades", trades_command))
+    app.add_handler(CommandHandler("open_trade", open_trade_command))
     app.add_handler(CommandHandler("manual_trade", manual_trade_command))
     app.add_handler(CommandHandler("export", export_command))
 
@@ -73,7 +74,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, manual_entry_message_handler))
 
     # Callback Query Handlers
-    app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade|retry_ocr|manual_entry|confirm_close_trade|cancel_close_trade|choose_close_trade:\\d+)$"))
+    app.add_handler(CallbackQueryHandler(callback_trade_action, pattern="^(save_current_trade|skip_current_trade|discard_pending_trades|confirm_save_trade|discard_pending_trade|retry_ocr|manual_entry|confirm_close_trade|cancel_close_trade|choose_close_trade:\\d+|open_trade_close:\\d+)$"))
     app.add_handler(CallbackQueryHandler(delete_trade_callback, pattern="^del_trade_"))
     app.add_handler(CallbackQueryHandler(export_callback_handler, pattern="^export_"))
     app.add_handler(CallbackQueryHandler(inline_shortcut_router, pattern="^cmd_"))

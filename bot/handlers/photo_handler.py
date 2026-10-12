@@ -64,7 +64,29 @@ async def callback_trade_action(update: Update, context: ContextTypes.DEFAULT_TY
     if data == "cancel_close_trade":
         context.user_data.pop("pending_close_data", None)
         context.user_data.pop("pending_close_trade", None)
+        context.user_data.pop("open_trade_close_flow", None)
         await query.edit_message_text("Trade close cancelled. The open trade was not changed.")
+        return
+
+    if data.startswith("open_trade_close:"):
+        try:
+            trade_id = int(data.split(":", 1)[1])
+        except (IndexError, ValueError):
+            trade_id = 0
+        matches = await get_open_user_trades(user.id, trade_id=trade_id)
+        if not matches:
+            await query.edit_message_text("That open trade is no longer available. Run /open_trade to refresh the list.")
+            return
+        trade = matches[0]
+        context.user_data["open_trade_close_flow"] = {"trade_id": trade.id, "step": "close_price"}
+        context.user_data.pop("pending_close_data", None)
+        context.user_data.pop("pending_close_trade", None)
+        await query.edit_message_text(
+            f"Closing <b>{html.escape(trade.symbol)}</b> {trade.trade_type} {trade.volume:g} lots "
+            f"(ticket #{html.escape(str(trade.ticket or trade.id))}, entry {trade.open_price:g}).\n\n"
+            "Send the <b>closing price</b> for this trade.",
+            parse_mode="HTML",
+        )
         return
 
     if data.startswith("choose_close_trade:"):
@@ -176,6 +198,8 @@ async def manual_entry_message_handler(update: Update, context: ContextTypes.DEF
     message = update.message
     user = update.effective_user
     if not message or not message.text or not user or not context.user_data.get("awaiting_manual_entry"):
+        if message and message.text and user and context.user_data.get("open_trade_close_flow"):
+            await _handle_open_trade_close_reply(update, context)
         return
 
     fields = {}
@@ -231,6 +255,62 @@ async def manual_entry_message_handler(update: Update, context: ContextTypes.DEF
         f"• <b>Net PnL:</b> ${saved.net_profit:+,.2f}\n"
         f"• <b>Pips:</b> {saved.pips:+}"
     )
+
+
+async def open_trade_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List this Telegram user's open trades and let them start closing one."""
+    user = update.effective_user
+    if not user or not update.message:
+        return
+    await get_or_create_user(user.id, user.username, user.first_name)
+    trades = await get_open_user_trades(user.id)
+    context.user_data.pop("open_trade_close_flow", None)
+    if not trades:
+        await update.message.reply_text("You have no open trades right now.")
+        return
+    keyboard = []
+    for trade in trades[:90]:
+        label = f"#{trade.ticket or trade.id} · {trade.symbol} {trade.trade_type} {trade.volume:g} · {trade.open_price:g}"
+        keyboard.append([InlineKeyboardButton(label[:64], callback_data=f"open_trade_close:{trade.id}")])
+    await update.message.reply_html(
+        f"📂 <b>Your open trades ({len(trades)})</b>\nChoose a trade to close:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+
+async def _handle_open_trade_close_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = update.message
+    flow = context.user_data.get("open_trade_close_flow")
+    user = update.effective_user
+    if not message or not flow or not user:
+        return
+    try:
+        value = _parse_manual_number(message.text)
+        if not math.isfinite(value):
+            raise ValueError
+        if flow["step"] == "close_price":
+            if value <= 0:
+                raise ValueError
+            flow["close_price"] = value
+            flow["step"] = "net_profit"
+            await message.reply_text("Now send the realized net PnL (use a negative number for a loss, e.g. -12.50).")
+            return
+        if flow["step"] == "net_profit":
+            trade_matches = await get_open_user_trades(user.id, trade_id=int(flow["trade_id"]))
+            if not trade_matches:
+                context.user_data.pop("open_trade_close_flow", None)
+                await message.reply_text("That trade is no longer open. Run /open_trade to refresh the list.")
+                return
+            trade = trade_matches[0]
+            close_data = {
+                "close_price": float(flow["close_price"]),
+                "net_profit": value,
+            }
+            context.user_data.pop("open_trade_close_flow", None)
+            await _show_close_confirmation(message, trade, close_data, context)
+    except (ValueError, TypeError):
+        prompt = "closing price" if flow.get("step") == "close_price" else "realized net PnL"
+        await message.reply_text(f"Please send a valid number for the {prompt}.")
 
 
 def _parse_manual_number(value: str) -> float:
