@@ -2,7 +2,7 @@ import logging
 import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from bot.db import get_or_create_user, get_user_trades, delete_user_trade, add_trade
+from bot.db import get_or_create_user, get_user_trades, delete_user_trade, add_trade, DuplicateTradeError
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,11 @@ async def manual_trade_command(update: Update, context: ContextTypes.DEFAULT_TYP
             "close_time": datetime.datetime.utcnow()
         }
 
-        trade = await add_trade(user.id, trade_data)
+        try:
+            trade = await add_trade(user.id, trade_data)
+        except DuplicateTradeError as error:
+            await update.message.reply_text(f"⚠️ {error} No duplicate entry was added.")
+            return
         pnl_symbol = "🟢 +" if profit >= 0 else "🔴 -"
         
         await update.message.reply_html(
