@@ -336,9 +336,11 @@ def generate_excel_report(user_info: Dict[str, Any], trades: List[Any], stats: D
         ws["E24"] = "Currency attribution"; ws["F24"] = "Base/quote side"
         ws["E25"] = "Method"; ws["F25"] = "BUY: +base / −quote; SELL: reversed"
         opening_capital = float(user_info.get("opening_capital", 0.0) or 0.0)
+        total_withdrawals = float(user_info.get("total_withdrawals", 0.0) or 0.0)
         ws["E26"] = "Opening capital"; ws["F26"] = opening_capital
-        ws["E27"] = "Current balance"; ws["F27"] = opening_capital + float(stats.get("total_net_pnl", 0.0) or 0.0)
-        for row in range(20, 28):
+        ws["E27"] = "Withdrawals"; ws["F27"] = total_withdrawals
+        ws["E28"] = "Current balance"; ws["F28"] = opening_capital + float(stats.get("total_net_pnl", 0.0) or 0.0) - total_withdrawals
+        for row in range(20, 29):
             for col in (5, 6):
                 ws.cell(row=row, column=col).font = body_font
                 ws.cell(row=row, column=col).border = thin_border
@@ -347,6 +349,7 @@ def generate_excel_report(user_info: Dict[str, Any], trades: List[Any], stats: D
         ws["F23"].number_format = money_format
         ws["F26"].number_format = money_format
         ws["F27"].number_format = money_format
+        ws["F28"].number_format = money_format
         for row, (currency, pnl) in enumerate(currency_rows, start=21):
             ws.cell(row=row, column=1, value=currency).font = body_font
             ws.cell(row=row, column=2, value=pnl).number_format = money_format
