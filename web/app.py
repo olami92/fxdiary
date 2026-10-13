@@ -207,6 +207,23 @@ async def health_check():
     """Health check endpoint for Render."""
     return {"status": "ok", "app": "MyFXkeeper"}
 
+@app.post("/api/cron/daily-notifications")
+async def daily_notifications_cron(request: Request):
+    """Authenticated entry point for an external free cron service."""
+    expected_secret = os.getenv("DAILY_CRON_SECRET", "").strip()
+    authorization = request.headers.get("authorization", "")
+    if not expected_secret:
+        raise HTTPException(status_code=503, detail="Daily notification cron is not configured.")
+    if not hmac.compare_digest(authorization, f"Bearer {expected_secret}"):
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+    from bot.daily_notifications import run_daily_notifications
+    try:
+        counts = await run_daily_notifications()
+    except Exception:
+        logger.exception("Scheduled daily notifications failed")
+        raise HTTPException(status_code=500, detail="Daily notifications failed.")
+    return {"status": "ok", "sent": counts}
+
 @app.get("/api/stats")
 async def get_stats(request: Request):
     """Fetch trading statistics JSON."""

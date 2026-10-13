@@ -145,7 +145,26 @@ Open `http://localhost:8000` in your browser to view the interactive dashboard!
 | `/stats` | View performance analytics & equity curve chart PNG |
 | `/trades` | View recent trade log history with delete options |
 | `/manual_trade` | Log a trade manually without a screenshot |
+| `/deposit` | Record a deposit and update opening capital |
 | `/export` | Download performance report as PDF or Excel (.xlsx) |
+
+### Daily Telegram notifications
+
+Configure an external cron provider to send an authenticated `POST` request every 15 minutes to:
+
+```text
+https://YOUR-RENDER-DOMAIN/api/cron/daily-notifications
+```
+
+Set the request header to `Authorization: Bearer YOUR_DAILY_CRON_SECRET`. Configure the same long random value as `DAILY_CRON_SECRET` in Render's environment variables. The endpoint is safe to call repeatedly; notification records prevent duplicate sends.
+
+For a machine with the project and environment variables installed, the equivalent system cron command is:
+
+```cron
+*/15 * * * * cd /path/to/fxdiary && python -m bot.daily_notifications
+```
+
+The worker uses `DATABASE_URL` and `TELEGRAM_BOT_TOKEN`. It sends a trade reminder at 09:00 in each user's configured timezone. At 23:00 local time, it sends a no-trades notice if that user has not logged any trades for the day, or a summary if trades were logged. Users without a configured timezone use UTC. Notifications are recorded to prevent duplicate messages if the cron runs again during the same window.
 
 ---
 

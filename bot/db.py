@@ -236,6 +236,31 @@ async def get_user_trades(telegram_id: int, limit: int = 100, offset: int = 0) -
         )
         return list(result.scalars().all())
 
+async def get_all_users() -> List[User]:
+    """Return registered users for scheduled account notifications."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(User).order_by(User.telegram_id))
+        return list(result.scalars().all())
+
+async def get_user_trades_logged_between(
+    telegram_id: int, start_utc: datetime.datetime, end_utc: datetime.datetime
+) -> List[Trade]:
+    """Return trades created in a user's local-day UTC interval."""
+    # Trade timestamps are stored as naive UTC values in both SQLite and Postgres.
+    start_value = start_utc.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    end_value = end_utc.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Trade)
+            .where(
+                Trade.user_id == telegram_id,
+                Trade.created_at >= start_value,
+                Trade.created_at < end_value,
+            )
+            .order_by(Trade.created_at.asc(), Trade.id.asc())
+        )
+        return list(result.scalars().all())
+
 async def get_open_user_trades(
     telegram_id: int,
     symbol: Optional[str] = None,
