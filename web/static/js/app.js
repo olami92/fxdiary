@@ -111,13 +111,13 @@ function setMoney(id, value, signed = false) {
 function renderTrades(trades, pagination) {
   const tbody = document.getElementById("trades-tbody");
   if (!trades?.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No trades in your journal yet. Your Telegram trade entries will appear here.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="empty-state">No trades in your journal yet. Your Telegram trade entries will appear here.</td></tr>';
   } else {
     tbody.innerHTML = trades.map((t) => {
       const pnl = Number(t.net_profit || 0), isOpen = t.status === "OPEN";
       const symbol = escapeHtml(t.symbol || "—"), type = escapeHtml(t.trade_type || "—");
       const date = isOpen ? "Open position" : (t.close_time || "—");
-      return `<tr><td><span class="trade-symbol">${symbol}</span><span class="trade-ticket">#${escapeHtml(t.ticket || t.id)}</span></td><td><span class="badge ${isOpen ? "badge-open" : "badge-closed"}">${isOpen ? "OPEN" : "CLOSED"}</span></td><td><span class="badge ${type === "BUY" ? "badge-buy" : "badge-sell"}">${type}</span></td><td>${Number(t.volume || 0).toFixed(2)} lots</td><td>${escapeHtml(String(t.open_price ?? "—"))} <span class="muted-arrow">→</span> ${isOpen ? "Open" : escapeHtml(String(t.close_price ?? "—"))}</td><td>${isOpen ? "—" : `${Number(t.pips || 0) > 0 ? "+" : ""}${Number(t.pips || 0)} pips`}</td><td>${isOpen ? "—" : `<span class="${pnl >= 0 ? "pnl-positive" : "pnl-negative"}">${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}</span>`}</td><td>${escapeHtml(date)}</td></tr>`;
+      return `<tr><td><span class="trade-symbol">${symbol}</span><span class="trade-ticket">#${escapeHtml(t.ticket || t.id)}</span></td><td><span class="badge ${isOpen ? "badge-open" : "badge-closed"}">${isOpen ? "OPEN" : "CLOSED"}</span></td><td><span class="badge ${type === "BUY" ? "badge-buy" : "badge-sell"}">${type}</span></td><td>${Number(t.volume || 0).toFixed(2)} lots</td><td>${escapeHtml(String(t.open_price ?? "—"))} <span class="muted-arrow">→</span> ${isOpen ? "Open" : escapeHtml(String(t.close_price ?? "—"))}</td><td>${isOpen ? "—" : `${Number(t.pips || 0) > 0 ? "+" : ""}${Number(t.pips || 0)} pips`}</td><td>${isOpen ? "—" : `<span class="${pnl >= 0 ? "pnl-positive" : "pnl-negative"}">${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}</span>`}</td><td>${escapeHtml(date)}</td><td><button class="trade-delete" type="button" data-trade-id="${Number(t.id)}" data-symbol="${symbol}" aria-label="Delete ${symbol} trade" title="Delete trade">Delete</button></td></tr>`;
     }).join("");
   }
   const paginationEl = document.getElementById("trade-pagination");
@@ -175,6 +175,23 @@ function formatChartDate(date) { return new Intl.DateTimeFormat(undefined, { mon
 function setupEventListeners() {
   document.getElementById("trade-prev-page")?.addEventListener("click", () => { if (currentTradesPage > 1) loadDashboardData(currentTradesPage - 1); });
   document.getElementById("trade-next-page")?.addEventListener("click", () => loadDashboardData(currentTradesPage + 1));
+  document.getElementById("trades-tbody")?.addEventListener("click", async (event) => {
+    const button = event.target.closest(".trade-delete");
+    if (!button) return;
+    const tradeId = Number(button.dataset.tradeId);
+    const symbol = button.dataset.symbol || "this trade";
+    if (!Number.isInteger(tradeId) || tradeId <= 0 || !window.confirm(`Delete ${symbol} trade #${tradeId}? This cannot be undone.`)) return;
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/trades/${tradeId}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.detail || "Could not delete this trade.");
+      await loadDashboardData(currentTradesPage);
+    } catch (error) {
+      window.alert(error.message || "Could not delete this trade. Please try again.");
+      button.disabled = false;
+    }
+  });
   document.getElementById("logout-button")?.addEventListener("click", async () => { await fetch("/api/auth/logout", { method: "POST" }); showSignIn(); });
   document.querySelectorAll(".period-button").forEach((button) => button.addEventListener("click", () => {
     document.querySelectorAll(".period-button").forEach((item) => item.classList.toggle("active", item === button));
