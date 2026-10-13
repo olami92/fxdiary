@@ -79,18 +79,20 @@ async function loadDashboardData(page = currentTradesPage) {
     const tradesData = await tradesRes.json();
     dashboardStats = statsData.stats || {};
     chartTrades = statsData.chart_trades || [];
-    renderStats(dashboardStats, statsData.opening_capital || 0);
+    renderStats(dashboardStats, statsData.opening_capital || 0, statsData.total_withdrawals || 0);
     currentTradesPage = tradesData.pagination.page;
     renderTrades(tradesData.trades, tradesData.pagination);
     updateCharts(chartTrades, dashboardStats);
   } catch (err) { console.error("Failed to load dashboard data:", err); }
 }
 
-function renderStats(stats, openingCapital) {
+function renderStats(stats, openingCapital, totalWithdrawals) {
   const pnl = Number(stats.total_net_pnl || 0);
-  const balance = Number(openingCapital || 0) + pnl;
+  const withdrawals = Number(totalWithdrawals || 0);
+  const balance = Number(openingCapital || 0) + pnl - withdrawals;
   setMoney("net-pnl", pnl, true);
   setMoney("opening-capital", Number(openingCapital || 0));
+  setMoney("total-withdrawals", withdrawals);
   setMoney("account-balance", balance);
   document.getElementById("win-rate").textContent = `${Number(stats.win_rate || 0).toFixed(1)}%`;
   document.getElementById("total-trades").textContent = Number(stats.total_trades || 0).toLocaleString();
