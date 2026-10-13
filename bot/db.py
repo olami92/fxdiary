@@ -29,6 +29,7 @@ class User(Base):
     sheet_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     currency: Mapped[str] = mapped_column(String(10), default="USD")
     opening_capital: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    total_withdrawals: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     timezone: Mapped[str] = mapped_column(String(50), default="UTC")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow)
     last_active: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -87,6 +88,7 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_trade_status_column)
         await conn.run_sync(_ensure_user_opening_capital_column)
+        await conn.run_sync(_ensure_user_total_withdrawals_column)
 
 def _ensure_trade_status_column(connection):
     """Add trade status to databases created before open voice entries existed."""
@@ -99,6 +101,12 @@ def _ensure_user_opening_capital_column(connection):
     columns = {column["name"] for column in inspect(connection).get_columns("users")}
     if "opening_capital" not in columns:
         connection.execute(text("ALTER TABLE users ADD COLUMN opening_capital FLOAT NOT NULL DEFAULT 0"))
+
+def _ensure_user_total_withdrawals_column(connection):
+    """Add cumulative withdrawals for existing installations."""
+    columns = {column["name"] for column in inspect(connection).get_columns("users")}
+    if "total_withdrawals" not in columns:
+        connection.execute(text("ALTER TABLE users ADD COLUMN total_withdrawals FLOAT NOT NULL DEFAULT 0"))
 
 async def get_or_create_user(telegram_id: int, username: str = None, first_name: str = None) -> User:
     """Retrieve existing user or create a new user entry."""
@@ -346,6 +354,20 @@ async def add_user_deposit(telegram_id: int, amount: float) -> Optional[float]:
             return None
         await session.commit()
         refreshed = await session.execute(select(User.opening_capital).where(User.telegram_id == telegram_id))
+        return float(refreshed.scalar_one())
+
+async def add_user_withdrawal(telegram_id: int, amount: float) -> Optional[float]:
+    """Increase a user's cumulative recorded withdrawals."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            update(User)
+            .where(User.telegram_id == telegram_id)
+            .values(total_withdrawals=User.total_withdrawals + float(amount))
+        )
+        if result.rowcount == 0:
+            return None
+        await session.commit()
+        refreshed = await session.execute(select(User.total_withdrawals).where(User.telegram_id == telegram_id))
         return float(refreshed.scalar_one())
 
 async def get_most_traded_currencies() -> Dict[int, set[str]]:
