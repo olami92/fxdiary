@@ -366,19 +366,25 @@ async def download_pdf(request: Request):
 
 @app.get("/api/export/excel")
 async def download_excel(request: Request):
-    """Export Excel spreadsheet."""
+    """Download the signed-in user's full MyFXkeeper Excel report."""
     user = await _require_dashboard_user(request)
     telegram_id = user.telegram_id
-    trades = await get_user_trades(telegram_id, limit=500)
+    total_trades = await count_user_trades(telegram_id)
+    trades = await get_user_trades(telegram_id, limit=max(total_trades, 1))
     stats = calculate_stats(trades)
     
-    excel_path = str(UPLOADS_DIR / f"FXDiary_Journal_{telegram_id}.xlsx")
-    user_info = {"first_name": user.first_name or "Trader", "username": user.username}
+    excel_path = str(UPLOADS_DIR / f"MyFXkeeper_Report_{telegram_id}.xlsx")
+    user_info = {
+        "first_name": user.first_name or "Trader",
+        "username": user.username,
+        "opening_capital": user.opening_capital or 0.0,
+        "timezone": user.timezone or "UTC",
+    }
     
     if generate_excel_report(user_info, trades, stats, excel_path):
         return FileResponse(
             excel_path,
-            filename="FXDiary_Trading_Journal.xlsx",
+            filename="MyFXkeeper_Trading_Performance_Report.xlsx",
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     raise HTTPException(status_code=500, detail="Failed to generate Excel report")
