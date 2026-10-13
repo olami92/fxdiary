@@ -349,7 +349,7 @@ async def _handle_open_trade_close_reply(update: Update, context: ContextTypes.D
                 "net_profit": value,
             }
             context.user_data.pop("open_trade_close_flow", None)
-            await _show_close_confirmation(message, trade, close_data, context)
+            await _show_close_confirmation(message, trade, close_data, context, edit_message=False)
     except (ValueError, TypeError):
         prompt = "closing price" if flow.get("step") == "close_price" else "realized net PnL"
         await message.reply_text(f"Please send a valid number for the {prompt}.")
@@ -379,7 +379,7 @@ def _manual_entry_template() -> str:
     )
 
 
-async def _show_close_confirmation(message, trade, close_data, context: ContextTypes.DEFAULT_TYPE):
+async def _show_close_confirmation(message, trade, close_data, context: ContextTypes.DEFAULT_TYPE, edit_message: bool = True):
     close_price = float(close_data["close_price"])
     net_profit = float(close_data["net_profit"])
     pips = calculate_pips(trade.symbol, trade.trade_type, trade.open_price, close_price)
@@ -404,7 +404,10 @@ async def _show_close_confirmation(message, trade, close_data, context: ContextT
         InlineKeyboardButton("✅ Confirm Close", callback_data="confirm_close_trade"),
         InlineKeyboardButton("Cancel", callback_data="cancel_close_trade"),
     ]])
-    await message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    if edit_message:
+        await message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+    else:
+        await message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def _reply_manual_entry_error(message, error: str):
