@@ -40,17 +40,18 @@ logger = logging.getLogger(__name__)
 
 async def _run_telegram_bot_background(token: str):
     """Run Telegram bot polling in a non-blocking background task."""
-    from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-    from bot.handlers.start_handler import start_command, help_command
-    from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler, open_trade_command, deposit_command
-    from bot.handlers.voice_handler import voice_message_handler
-    from bot.handlers.stats_handler import stats_command
-    from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
-    from bot.handlers.export_handler import export_command, export_callback_handler
-    from bot.economic_calendar import start_economic_calendar_alerts
-    from bot.main import inline_shortcut_router
-
+    bot_app = None
     try:
+        from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+        from bot.handlers.start_handler import start_command, help_command
+        from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler, open_trade_command, deposit_command, withdrawal_command
+        from bot.handlers.voice_handler import voice_message_handler
+        from bot.handlers.stats_handler import stats_command
+        from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
+        from bot.handlers.export_handler import export_command, export_callback_handler
+        from bot.economic_calendar import start_economic_calendar_alerts
+        from bot.main import inline_shortcut_router
+
         logger.info("Initializing Telegram Bot in background...")
         bot_app = ApplicationBuilder().token(token).build()
         bot_app.add_handler(CommandHandler("start", start_command))
@@ -59,6 +60,8 @@ async def _run_telegram_bot_background(token: str):
         bot_app.add_handler(CommandHandler("trades", trades_command))
         bot_app.add_handler(CommandHandler("open_trade", open_trade_command))
         bot_app.add_handler(CommandHandler("deposit", deposit_command))
+        bot_app.add_handler(CommandHandler("withdrawal", withdrawal_command))
+        bot_app.add_handler(CommandHandler("withdraw", withdrawal_command))
         bot_app.add_handler(CommandHandler("manual_trade", manual_trade_command))
         bot_app.add_handler(CommandHandler("export", export_command))
         bot_app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
@@ -74,8 +77,8 @@ async def _run_telegram_bot_background(token: str):
         await bot_app.updater.start_polling(drop_pending_updates=True)
         start_economic_calendar_alerts(bot_app)
         logger.info("Telegram Bot active and polling!")
-    except Exception as e:
-        logger.warning(f"Telegram Bot polling warning: {e}. If another instance is running, only one can poll at a time.")
+    except Exception:
+        logger.exception("Telegram bot startup or polling failed; check the traceback above.")
 
 @app.on_event("startup")
 async def startup_event():
@@ -235,6 +238,7 @@ async def get_stats(request: Request):
         "user": {"name": user.first_name or "Trader"},
         "stats": stats,
         "opening_capital": user.opening_capital or 0.0,
+        "total_withdrawals": user.total_withdrawals or 0.0,
         "chart_trades": [
             {"net_profit": trade.net_profit or 0.0,
              "close_time": f"{trade.close_time.isoformat()}Z" if trade.close_time else None,
@@ -378,6 +382,7 @@ async def download_excel(request: Request):
         "first_name": user.first_name or "Trader",
         "username": user.username,
         "opening_capital": user.opening_capital or 0.0,
+        "total_withdrawals": user.total_withdrawals or 0.0,
         "timezone": user.timezone or "UTC",
     }
     
