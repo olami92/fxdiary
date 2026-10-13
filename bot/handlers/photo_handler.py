@@ -9,7 +9,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ForceRe
 from telegram.ext import ContextTypes
 from bot.config import UPLOADS_DIR, GEMINI_API_KEY
 from bot.ocr_engine import parse_mt5_screenshot
-from bot.db import get_or_create_user, add_trade, calculate_pips, get_open_user_trades, close_user_trade, add_user_deposit, add_user_withdrawal
+from bot.db import get_or_create_user, add_trade, calculate_pips, get_open_user_trades, close_user_trade, add_user_deposit, add_user_withdrawal, DuplicateTradeError
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +176,12 @@ async def callback_trade_action(update: Update, context: ContextTypes.DEFAULT_TY
             return
         trade_data = pending_trades[index]
         trade_data["screenshot_path"] = screenshot_path
-        await add_trade(user.id, trade_data)
+        try:
+            await add_trade(user.id, trade_data)
+        except DuplicateTradeError:
+            context.user_data["skipped_trade_count"] = context.user_data.get("skipped_trade_count", 0) + 1
+            await _advance_pending_trade(query, context, index + 1, len(pending_trades))
+            return
         context.user_data["saved_trade_count"] = context.user_data.get("saved_trade_count", 0) + 1
         await _advance_pending_trade(query, context, index + 1, len(pending_trades))
 
@@ -252,7 +257,12 @@ async def manual_entry_message_handler(update: Update, context: ContextTypes.DEF
         "screenshot_path": context.user_data.get("current_screenshot"),
     }
     await get_or_create_user(user.id, user.username, user.first_name)
-    saved = await add_trade(user.id, trade_data)
+    try:
+        saved = await add_trade(user.id, trade_data)
+    except DuplicateTradeError as error:
+        context.user_data.pop("awaiting_manual_entry", None)
+        await message.reply_text(f"⚠️ {error} No duplicate entry was added.")
+        return
     context.user_data.pop("awaiting_manual_entry", None)
     await message.reply_html(
         f"✅ <b>Trade saved to your diary.</b>\n\n"
