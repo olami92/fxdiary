@@ -27,7 +27,7 @@ from bot.export_engine import generate_pdf_report, generate_excel_report
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-app = FastAPI(title="MyFXkeeper Dashboard & Web App")
+app = FastAPI(title="MyFX keeper Dashboard & Web App")
 SESSION_SECRET = os.getenv("SESSION_SECRET") or os.getenv("TELEGRAM_BOT_TOKEN") or secrets.token_urlsafe(32)
 TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, same_site="lax", https_only=os.getenv("RENDER", "") != "")
@@ -207,7 +207,7 @@ async def health_check():
     """Health check endpoint for Render."""
     return {"status": "ok", "app": "MyFXkeeper"}
 
-@app.post("/api/cron/daily-notifications")
+@app.api_route("/api/cron/daily-notifications", methods=["GET", "POST"])
 async def daily_notifications_cron(request: Request):
     """Authenticated entry point for an external free cron service."""
     expected_secret = os.getenv("DAILY_CRON_SECRET", "").strip()
