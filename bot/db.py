@@ -5,6 +5,7 @@ if user_site and user_site not in sys.path:
     sys.path.insert(0, user_site)
 
 import datetime
+import math
 import re
 from typing import List, Optional, Dict, Any
 from sqlalchemy import (
@@ -182,7 +183,7 @@ def parse_datetime_safe(val: Any, default_now: bool = False) -> Optional[datetim
     return None
 
 async def add_trade(telegram_id: int, trade_data: Dict[str, Any]) -> Trade:
-    """Save a new trade to the database."""
+    """Save a new trade, rejecting repeats of the same broker ticket or trade details."""
     async with AsyncSessionLocal() as session:
         # Calculate pips if missing
         open_price = float(trade_data.get("open_price", 0.0))
@@ -204,6 +205,49 @@ async def add_trade(telegram_id: int, trade_data: Dict[str, Any]) -> Trade:
 
         open_time = parse_datetime_safe(trade_data.get("open_time"), default_now=False)
         close_time = parse_datetime_safe(trade_data.get("close_time"), default_now=True)
+        status = str(trade_data.get("status", "CLOSED")).upper()
+
+        # Broker ticket numbers are unique per account and remain the strongest
+        # duplicate signal, including when OCR/manual entry is retried later.
+        if ticket_str:
+            ticket_str = ticket_str.strip().upper()
+            existing = await session.execute(
+                select(Trade).where(
+                    Trade.user_id == telegram_id,
+                    func.upper(Trade.ticket) == ticket_str,
+                ).limit(1)
+            )
+            duplicate = existing.scalars().first()
+            if duplicate:
+                raise DuplicateTradeError(duplicate.id, duplicate.ticket)
+        else:
+            # Some screenshots and manual/voice entries have no ticket. Match
+            # identical trade details recorded within one minute to suppress
+            # accidental repeat submissions without blocking later trades.
+            recent = await session.execute(
+                select(Trade)
+                .where(
+                    Trade.user_id == telegram_id,
+                    Trade.ticket.is_(None),
+                    Trade.symbol == symbol,
+                    Trade.trade_type == trade_type,
+                    Trade.status == status,
+                )
+                .order_by(Trade.created_at.desc())
+                .limit(100)
+            )
+            for candidate in recent.scalars():
+                same_values = (
+                    math.isclose(candidate.volume, float(trade_data.get("volume", 0.01)), rel_tol=0, abs_tol=1e-9)
+                    and math.isclose(candidate.open_price, open_price, rel_tol=0, abs_tol=1e-9)
+                    and math.isclose(candidate.close_price, close_price, rel_tol=0, abs_tol=1e-9)
+                    and math.isclose(candidate.net_profit, float(net_profit), rel_tol=0, abs_tol=1e-9)
+                )
+                candidate_time = candidate.close_time or candidate.created_at
+                new_time = close_time or datetime.datetime.utcnow()
+                same_time = candidate_time is not None and abs((candidate_time - new_time).total_seconds()) <= 60
+                if same_values and same_time:
+                    raise DuplicateTradeError(candidate.id, None)
 
         trade = Trade(
             user_id=telegram_id,
@@ -222,7 +266,7 @@ async def add_trade(telegram_id: int, trade_data: Dict[str, Any]) -> Trade:
             pips=pips,
             open_time=open_time,
             close_time=close_time,
-            status=str(trade_data.get("status", "CLOSED")).upper(),
+            status=status,
             screenshot_path=trade_data.get("screenshot_path"),
             notes=trade_data.get("notes"),
             synced_to_sheet=trade_data.get("synced_to_sheet", False)
@@ -231,6 +275,16 @@ async def add_trade(telegram_id: int, trade_data: Dict[str, Any]) -> Trade:
         await session.commit()
         await session.refresh(trade)
         return trade
+
+
+class DuplicateTradeError(ValueError):
+    """Raised when a user attempts to save a trade already in their journal."""
+
+    def __init__(self, existing_trade_id: int, ticket: Optional[str] = None):
+        self.existing_trade_id = existing_trade_id
+        self.ticket = ticket
+        identity = f"ticket #{ticket}" if ticket else f"trade #{existing_trade_id}"
+        super().__init__(f"This trade is already in your journal ({identity}).")
 
 async def get_user_trades(telegram_id: int, limit: int = 100, offset: int = 0) -> List[Trade]:
     """Retrieve trades for a specific user ordered by latest."""
