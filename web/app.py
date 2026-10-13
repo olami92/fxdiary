@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 from bot.config import UPLOADS_DIR, GEMINI_API_KEY, HOST, PORT
-from bot.db import init_db, get_or_create_user, get_user_trades, count_user_trades, add_trade, delete_user_trade, set_user_opening_capital, AsyncSessionLocal
+from bot.db import init_db, get_or_create_user, get_user_trades, count_user_trades, add_trade, delete_user_trade, set_user_opening_capital, AsyncSessionLocal, DuplicateTradeError
 from bot.analytics import calculate_stats, generate_equity_chart
 from bot.ocr_engine import parse_mt5_screenshot
 from bot.export_engine import generate_pdf_report, generate_excel_report
@@ -343,7 +343,10 @@ async def create_trade(trade_req: ManualTradeRequest, request: Request):
         "net_profit": trade_req.profit,
         "close_time": datetime.datetime.utcnow()
     }
-    trade = await add_trade(user.telegram_id, trade_data)
+    try:
+        trade = await add_trade(user.telegram_id, trade_data)
+    except DuplicateTradeError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
     return JSONResponse(content={"success": True, "trade_id": trade.id})
 
 @app.delete("/api/trades/{trade_id}")
