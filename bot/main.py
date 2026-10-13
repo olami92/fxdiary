@@ -9,7 +9,7 @@ from telegram.ext import (
 from bot.config import TELEGRAM_BOT_TOKEN
 from bot.db import init_db
 from bot.handlers.start_handler import start_command, help_command
-from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler, open_trade_command, deposit_command
+from bot.handlers.photo_handler import photo_message_handler, callback_trade_action, manual_entry_message_handler, open_trade_command, deposit_command, withdrawal_command
 from bot.handlers.voice_handler import voice_message_handler
 from bot.handlers.stats_handler import stats_command
 from bot.handlers.trades_handler import trades_command, manual_trade_command, delete_trade_callback
@@ -66,6 +66,8 @@ def main():
     app.add_handler(CommandHandler("trades", trades_command))
     app.add_handler(CommandHandler("open_trade", open_trade_command))
     app.add_handler(CommandHandler("deposit", deposit_command))
+    app.add_handler(CommandHandler("withdrawal", withdrawal_command))
+    app.add_handler(CommandHandler("withdraw", withdrawal_command))
     app.add_handler(CommandHandler("manual_trade", manual_trade_command))
     app.add_handler(CommandHandler("export", export_command))
 
