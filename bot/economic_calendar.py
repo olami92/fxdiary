@@ -21,6 +21,7 @@ from bot.db import (
 
 logger = logging.getLogger(__name__)
 CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+FALLBACK_CALENDAR_URL = "https://www.financecalendar.com/wp-json/fc/v1/calendar"
 CHECK_INTERVAL_SECONDS = 15 * 60
 ALERT_WINDOW_MINUTES = 30
 MAX_RETRY_SECONDS = 6 * 60 * 60
@@ -30,35 +31,61 @@ _retry_delay = CHECK_INTERVAL_SECONDS
 
 
 def _fetch_calendar() -> List[Dict[str, Any]]:
-    """Fetch events with a process-local cache and backoff for provider failures."""
+    """Fetch the primary feed, falling back to a second free calendar provider."""
     global _calendar_cache, _next_fetch_at, _retry_delay
     now = time.monotonic()
     if now < _next_fetch_at:
         return _calendar_cache
 
     try:
-        response = requests.get(CALENDAR_URL, timeout=20, headers={"User-Agent": "MyFXkeeper/1.0"})
-        if response.status_code == 429:
-            retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
-            delay = max(retry_after or 0, _retry_delay)
-            _next_fetch_at = now + delay
-            _retry_delay = min(max(_retry_delay * 2, CHECK_INTERVAL_SECONDS), MAX_RETRY_SECONDS)
-            logger.warning(
-                "Economic calendar provider rate-limited requests (HTTP 429); "
-                "using %s cached events and retrying in about %d minutes.",
-                len(_calendar_cache), max(1, delay // 60),
-            )
-            return _calendar_cache
+        errors = []
+        utc_today = datetime.datetime.now(datetime.timezone.utc).date()
+        for source, url, params in (
+            ("Forex Factory", CALENDAR_URL, None),
+            (
+                "Finance Calendar",
+                FALLBACK_CALENDAR_URL,
+                {
+                    "from": utc_today.isoformat(),
+                    "to": (utc_today + datetime.timedelta(days=7)).isoformat(),
+                    "impact": "high",
+                    "limit": 500,
+                },
+            ),
+        ):
+            try:
+                response = requests.get(url, params=params, timeout=20, headers={"User-Agent": "MyFXkeeper/1.0"})
+                if response.status_code == 429:
+                    retry_after = _retry_after_seconds(response.headers.get("Retry-After"))
+                    errors.append(f"{source}: HTTP 429")
+                    if source == "Forex Factory":
+                        _retry_delay = max(_retry_delay, retry_after or 0)
+                    continue
+                response.raise_for_status()
+                data = response.json()
+                if isinstance(data, dict):
+                    data = data.get("events", [])
+                if not isinstance(data, list):
+                    raise ValueError("response was not a JSON event list")
+                normalized = [_normalize_event(event) for event in data if isinstance(event, dict)]
+                normalized = [event for event in normalized if event]
+                if normalized:
+                    for event in normalized:
+                        event.setdefault("source", source)
+                        if source == "Finance Calendar":
+                            event.setdefault("url", "https://www.financecalendar.com")
+                        else:
+                            event.setdefault("url", "https://www.forexfactory.com/calendar")
+                    _calendar_cache = normalized
+                    _next_fetch_at = now + CHECK_INTERVAL_SECONDS
+                    _retry_delay = CHECK_INTERVAL_SECONDS
+                    logger.info("Loaded %d economic events from %s.", len(normalized), source)
+                    return _calendar_cache
+                errors.append(f"{source}: response contained no usable events")
+            except Exception as error:
+                errors.append(f"{source}: {error}")
 
-        response.raise_for_status()
-        data = response.json()
-        if not isinstance(data, list):
-            raise ValueError("Economic calendar did not return a JSON event list.")
-        _calendar_cache = [event for event in data if isinstance(event, dict)]
-        _next_fetch_at = now + CHECK_INTERVAL_SECONDS
-        _retry_delay = CHECK_INTERVAL_SECONDS
-        return _calendar_cache
-    except Exception as error:
+        error = "; ".join(errors)
         # Use stale events if the provider is temporarily unavailable. This keeps
         # the alert loop useful without hammering an endpoint that is failing.
         _next_fetch_at = now + _retry_delay
@@ -69,6 +96,27 @@ def _fetch_calendar() -> List[Dict[str, Any]]:
             error, len(_calendar_cache), max(1, (_next_fetch_at - now) // 60),
         )
         return _calendar_cache
+    except Exception as error:
+        _next_fetch_at = now + _retry_delay
+        _retry_delay = min(max(_retry_delay * 2, CHECK_INTERVAL_SECONDS), MAX_RETRY_SECONDS)
+        logger.exception("Unexpected economic calendar fetch error: %s", error)
+        return _calendar_cache
+
+
+def _normalize_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Map supported provider fields to the common alert-event shape."""
+    normalized = dict(event)
+    normalized["date"] = event.get("time_utc") or event.get("date") or event.get("datetime")
+    normalized["title"] = event.get("title") or event.get("name") or event.get("event")
+    normalized["impact"] = str(event.get("impact") or "").strip().casefold().title()
+    normalized["forecast"] = event.get("forecast") or event.get("consensus") or event.get("estimate")
+    normalized["previous"] = event.get("previous") or event.get("prior")
+    normalized["id"] = event.get("id") or event.get("event_id") or event.get("calendarId")
+    if event.get("all_day") is True:
+        return None
+    if not normalized["date"] or not normalized["title"]:
+        return None
+    return normalized
 
 
 def _retry_after_seconds(value: Optional[str]) -> Optional[int]:
@@ -88,7 +136,7 @@ def _retry_after_seconds(value: Optional[str]) -> Optional[int]:
 
 
 def _event_datetime(event: Dict[str, Any]) -> Optional[datetime.datetime]:
-    value = event.get("date")
+    value = event.get("time_utc") or event.get("date") or event.get("datetime")
     if not value:
         return None
     try:
@@ -104,15 +152,16 @@ def _event_currency(event: Dict[str, Any]) -> str:
     value = str(event.get("currency") or event.get("country") or "").strip().upper()
     aliases = {
         "UNITED STATES": "USD", "UNITED STATES OF AMERICA": "USD", "US": "USD", "USA": "USD",
-        "EURO AREA": "EUR", "EUROZONE": "EUR", "UNITED KINGDOM": "GBP", "UK": "GBP",
+        "EURO AREA": "EUR", "EUROZONE": "EUR", "EU": "EUR", "GERMANY": "EUR", "FRANCE": "EUR",
+        "ITALY": "EUR", "SPAIN": "EUR", "NETHERLANDS": "EUR", "UNITED KINGDOM": "GBP", "UK": "GBP", "BRITAIN": "GBP",
         "JAPAN": "JPY", "CANADA": "CAD", "AUSTRALIA": "AUD", "NEW ZEALAND": "NZD",
-        "SWITZERLAND": "CHF", "CHINA": "CNY",
+        "SWITZERLAND": "CHF", "CHINA": "CNY", "C$": "CAD", "A$": "AUD", "NZ$": "NZD",
     }
     return aliases.get(value, value)
 
 
 def _event_key(event: Dict[str, Any], when: datetime.datetime, currency: str) -> str:
-    identity = event.get("id") or event.get("event_id") or ""
+    identity = event.get("id") or event.get("event_id") or event.get("calendarId") or ""
     if not identity:
         identity = f"{when.isoformat()}|{currency}|{event.get('title') or event.get('event') or ''}"
     return hashlib.sha256(str(identity).encode("utf-8")).hexdigest()
@@ -123,6 +172,12 @@ async def check_upcoming_events(bot: Bot) -> None:
     events = await asyncio.to_thread(_fetch_calendar)
     user_currencies = await get_most_traded_currencies()
     now = datetime.datetime.now(datetime.timezone.utc)
+    if not events:
+        logger.warning("Economic calendar check has no events available from either provider.")
+        return
+    if not user_currencies:
+        logger.info("Economic alerts are enabled, but users have no logged trade currencies to match yet.")
+        return
 
     for event in events:
         if str(event.get("impact") or "").strip().casefold() != "high":
@@ -154,11 +209,13 @@ async def check_upcoming_events(bot: Bot) -> None:
                 "minutes_until": minutes_until,
                 "forecast": event.get("forecast") or None,
                 "previous": event.get("previous") or None,
-                "source": "Forex Factory calendar",
+                "source": event.get("source") or "Forex Factory calendar",
             }
             message = (
                 "🔔 <b>High-impact economic event approaching</b>\n"
-                f"<pre>{html.escape(json.dumps(event_payload, ensure_ascii=False, indent=2))}</pre>"
+                f"<pre>{html.escape(json.dumps(event_payload, ensure_ascii=False, indent=2))}</pre>\n"
+                f"Source: <a href=\"{html.escape(str(event.get('url') or 'https://www.financecalendar.com'), quote=True)}\">"
+                f"{html.escape(str(event.get('source') or 'Finance Calendar'))}</a>"
             )
             try:
                 await bot.send_message(chat_id=telegram_id, text=message, parse_mode="HTML")
