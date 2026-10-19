@@ -1,4 +1,4 @@
-"""Periodic high-impact economic event alerts tailored to each user's trade history."""
+"""Daily economic news digests and alerts before high-impact major-currency events."""
 
 import asyncio
 import datetime
@@ -9,6 +9,7 @@ import logging
 import time
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
 from telegram import Bot
@@ -24,6 +25,7 @@ CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 FALLBACK_CALENDAR_URL = "https://www.financecalendar.com/wp-json/fc/v1/calendar"
 CHECK_INTERVAL_SECONDS = 15 * 60
 ALERT_WINDOW_MINUTES = 30
+MORNING_DIGEST_HOUR = 8
 MAJOR_CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"}
 MAX_RETRY_SECONDS = 6 * 60 * 60
 _calendar_cache: List[Dict[str, Any]] = []
@@ -47,7 +49,7 @@ def _fetch_calendar() -> List[Dict[str, Any]]:
                 "Finance Calendar",
                 FALLBACK_CALENDAR_URL,
                 {
-                    "from": utc_today.isoformat(),
+                    "from": (utc_today - datetime.timedelta(days=1)).isoformat(),
                     "to": (utc_today + datetime.timedelta(days=7)).isoformat(),
                     "impact": "high",
                     "limit": 500,
@@ -168,6 +170,77 @@ def _event_key(event: Dict[str, Any], when: datetime.datetime, currency: str) ->
     return hashlib.sha256(str(identity).encode("utf-8")).hexdigest()
 
 
+def _user_timezone(value: Optional[str]):
+    try:
+        return ZoneInfo(value or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        logger.warning("Invalid user timezone %r; using UTC for economic news.", value)
+        return datetime.timezone.utc
+
+
+def _is_major_high_impact_event(event: Dict[str, Any]) -> bool:
+    return (
+        str(event.get("impact") or "").strip().casefold() == "high"
+        and _event_currency(event) in MAJOR_CURRENCIES
+    )
+
+
+def _morning_digest(events: List[Dict[str, Any]], now: datetime.datetime, zone) -> str:
+    local_day = now.astimezone(zone).date()
+    todays_events = []
+    for event in events:
+        if not _is_major_high_impact_event(event):
+            continue
+        scheduled = _event_datetime(event)
+        if scheduled is None or scheduled <= now or scheduled.astimezone(zone).date() != local_day:
+            continue
+        currency = _event_currency(event)
+        local_time = scheduled.astimezone(zone).strftime("%H:%M")
+        title = html.escape(str(event.get("title") or event.get("event") or "Economic release"))
+        url = html.escape(str(event.get("url") or "https://www.financecalendar.com"), quote=True)
+        source = html.escape(str(event.get("source") or "Finance Calendar"))
+        details = []
+        forecast = event.get("forecast")
+        previous = event.get("previous")
+        if forecast not in (None, ""):
+            details.append(f"Forecast: {html.escape(str(forecast))}")
+        if previous not in (None, ""):
+            details.append(f"Previous: {html.escape(str(previous))}")
+        detail_text = f" · {' · '.join(details)}" if details else ""
+        todays_events.append(
+            (scheduled, f"• <b>{local_time} · {currency}</b> — {title}{detail_text} "
+                        f"(<a href=\"{url}\">{source}</a>)")
+        )
+
+    todays_events.sort(key=lambda item: item[0])
+    lines = [
+        f"🗓️ <b>Today's high-impact market news · {local_day:%A, %d %b}</b>",
+        f"Times shown in <b>{html.escape(str(zone))}</b>.",
+        "",
+    ]
+    lines.extend(line for _, line in todays_events[:30])
+    if not todays_events:
+        lines.append("No upcoming high-impact events for the major currencies today.")
+    if len(todays_events) > 30:
+        lines.append(f"…and {len(todays_events) - 30} more events.")
+    return "\n".join(lines)
+
+
+async def _send_morning_digest(bot: Bot, user, events: List[Dict[str, Any]], now: datetime.datetime, zone) -> None:
+    local_now = now.astimezone(zone)
+    if local_now.hour != MORNING_DIGEST_HOUR:
+        return
+    event_key = f"economic_morning_digest:{local_now.date().isoformat()}"
+    if await has_economic_alert_been_sent(user.telegram_id, event_key):
+        return
+    message = _morning_digest(events, now, zone)
+    try:
+        await bot.send_message(chat_id=user.telegram_id, text=message, parse_mode="HTML")
+        await record_economic_alert(user.telegram_id, event_key)
+    except Exception:
+        logger.exception("Could not send morning economic news to Telegram user %s", user.telegram_id)
+
+
 async def check_upcoming_events(bot: Bot) -> None:
     """Alert every registered user about high-impact events for major currencies."""
     events = await asyncio.to_thread(_fetch_calendar)
@@ -180,12 +253,14 @@ async def check_upcoming_events(bot: Bot) -> None:
         logger.info("Economic alerts are enabled, but there are no registered users yet.")
         return
 
+    for user in users:
+        zone = _user_timezone(user.timezone)
+        await _send_morning_digest(bot, user, events, now, zone)
+
     for event in events:
-        if str(event.get("impact") or "").strip().casefold() != "high":
+        if not _is_major_high_impact_event(event):
             continue
         currency = _event_currency(event)
-        if currency not in MAJOR_CURRENCIES:
-            continue
         scheduled = _event_datetime(event)
         if scheduled is None:
             continue
