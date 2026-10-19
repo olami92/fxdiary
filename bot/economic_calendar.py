@@ -14,7 +14,7 @@ import requests
 from telegram import Bot
 
 from bot.db import (
-    get_most_traded_currencies,
+    get_all_users,
     has_economic_alert_been_sent,
     record_economic_alert,
 )
@@ -24,6 +24,7 @@ CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 FALLBACK_CALENDAR_URL = "https://www.financecalendar.com/wp-json/fc/v1/calendar"
 CHECK_INTERVAL_SECONDS = 15 * 60
 ALERT_WINDOW_MINUTES = 30
+MAJOR_CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD"}
 MAX_RETRY_SECONDS = 6 * 60 * 60
 _calendar_cache: List[Dict[str, Any]] = []
 _next_fetch_at = 0.0
@@ -168,22 +169,22 @@ def _event_key(event: Dict[str, Any], when: datetime.datetime, currency: str) ->
 
 
 async def check_upcoming_events(bot: Bot) -> None:
-    """Fetch once, then alert each matching user once per high-impact event."""
+    """Alert every registered user about high-impact events for major currencies."""
     events = await asyncio.to_thread(_fetch_calendar)
-    user_currencies = await get_most_traded_currencies()
+    users = await get_all_users()
     now = datetime.datetime.now(datetime.timezone.utc)
     if not events:
         logger.warning("Economic calendar check has no events available from either provider.")
         return
-    if not user_currencies:
-        logger.info("Economic alerts are enabled, but users have no logged trade currencies to match yet.")
+    if not users:
+        logger.info("Economic alerts are enabled, but there are no registered users yet.")
         return
 
     for event in events:
         if str(event.get("impact") or "").strip().casefold() != "high":
             continue
         currency = _event_currency(event)
-        if not currency:
+        if currency not in MAJOR_CURRENCIES:
             continue
         scheduled = _event_datetime(event)
         if scheduled is None:
@@ -193,9 +194,8 @@ async def check_upcoming_events(bot: Bot) -> None:
             continue
 
         event_key = _event_key(event, scheduled, currency)
-        for telegram_id, currencies in user_currencies.items():
-            if currency not in currencies:
-                continue
+        for user in users:
+            telegram_id = user.telegram_id
             if await has_economic_alert_been_sent(telegram_id, event_key):
                 continue
 
